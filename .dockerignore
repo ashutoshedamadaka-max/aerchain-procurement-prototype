@@ -1,0 +1,27 @@
+# Upload/build only the code required by the hosted application.
+**
+!Dockerfile.vercel
+!.dockerignore
+!.vercelignore
+!requirements.txt
+!app/
+!app/**
+!src/
+!src/**
+!scripts/
+!scripts/schema.sql
+
+# Exclude local data and secrets even under an allowed source directory.
+**/.env
+**/.env.*
+**/secrets.toml
+**/credentials.json
+**/*.key
+**/*.pem
+**/*.db
+**/*.sqlite
+**/__pycache__/**
+**/*.pyc
+app/test_*.py
+app/demo_*.json
+app/DEMO_READINESS.md

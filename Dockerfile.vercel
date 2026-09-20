@@ -1,0 +1,17 @@
+FROM python:3.12-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    STREAMLIT_BROWSER_GATHER_USAGE_STATS=false
+
+WORKDIR /app
+COPY requirements.txt ./
+RUN pip install --no-cache-dir -r requirements.txt
+COPY app/ ./app/
+COPY src/ ./src/
+COPY scripts/schema.sql ./scripts/schema.sql
+
+# Vercel container functions expect an HTTP server on port 80 by default.
+EXPOSE 80
+CMD ["streamlit", "run", "app/main.py", "--server.address=0.0.0.0", "--server.port=80", "--server.headless=true", "--browser.gatherUsageStats=false"]

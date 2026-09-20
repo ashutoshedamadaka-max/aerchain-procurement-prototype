@@ -72,3 +72,11 @@ python scripts/generate_attachments.py
 ```
 
 Inspect the extraction and reporting entry points before running them: live extraction uses API credit. Never substitute the truth database for the pipeline database merely to populate the UI.
+
+## Vercel container deployment
+
+`Dockerfile.vercel` packages the existing Streamlit server using Vercel's Container Images beta. In the import screen, use the container detection (or Other rather than the Python function preset), keep the repository root, and leave custom build/output commands unset. The HTTP server listens on port 80.
+
+Only source files are copied into this container. The current image therefore has no populated procurement database or vendor documents. A populated demo needs a separately approved data package and deployment configuration. API credentials must be configured as Vercel environment variables; local `.env` files are excluded from both upload and build context.
+
+Container deployment requires Vercel account access to the beta. Streamlit sessions and local SQLite edits are instance-local and are not durable across scaling/redeploys. Validate interactive pages on the deployed URL before using it for a demo. This configuration has not been built locally because Docker is not installed in the development environment.

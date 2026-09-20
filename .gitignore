@@ -48,3 +48,6 @@ Thumbs.db
 /dataset/
 /procurement.db
 /SANITY.md
+
+# Vercel local project link and credentials
+.vercel/
