@@ -1,0 +1,50 @@
+# Credentials and private configuration
+.env
+.env.*
+!.env.example
+**/secrets.toml
+**/credentials.json
+**/service-account*.json
+*.pem
+*.key
+*.p12
+*.pfx
+
+# Local environments and tooling
+.venv/
+venv/
+env/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.claude/
+.codex/
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# SQLite temporary files (the synthetic demo DB itself is included)
+*-wal
+*-shm
+*-journal
+
+# Local diagnostics and old database copies
+/dataset/eval/*
+!/dataset/eval/eval_snapshot.json
+/app/demo_question_results.json
+/app/demo_live_usage.json
+/app/DEMO_READINESS.md
+/ASK_RELIABILITY_HANDOFF.md
+/COST_REPORT.md
+/NOTES.md
+*.log
+
+# Public source-only repository: keep datasets and reports local
+/dataset/
+/procurement.db
+/SANITY.md

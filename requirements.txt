@@ -1,0 +1,12 @@
+# App, document readers/generators and analyst providers
+streamlit==1.64.0
+openai==3.16.2
+anthropic==1.7.0
+openpyxl==3.1.5
+reportlab==4.4.9
+python-docx==1.2.0
+PyMuPDF==1.28.2
+Pillow==12.3.0
+numpy>=2.0,<3
+# Optional rate-card image generator
+opencv-python-headless>=4.10,<5

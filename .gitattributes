@@ -1,0 +1,10 @@
+# Preserve exact bytes of frozen truth, vendor documents and source files.
+* -text
+*.pdf binary
+*.png binary
+*.jpg binary
+*.xlsx binary
+*.docx binary
+*.sqlite binary
+*.db binary
+*.skill binary
