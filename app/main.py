@@ -101,16 +101,88 @@ COMPARE_CSS = """
 .cmp-grid td {padding:0;vertical-align:middle;border-bottom:1px solid #e4e4e4;background:#fff}
 .cmp-grid tr.row-amber th:first-child {border-left:4px solid #936510}
 .cmp-grid tr.row-red th:first-child {border-left:4px solid #a84343}
-.cmp-grid a.cmp-cell {display:block;margin:4px 6px;padding:6px 9px;border-radius:6px;text-decoration:none;
+.cmp-grid .cmp-cell {display:block;border:0;text-align:left;font:inherit;cursor:pointer;width:calc(100% - 12px);margin:4px 6px;padding:6px 9px;border-radius:6px;text-decoration:none;
 white-space:nowrap;overflow:hidden;text-overflow:ellipsis;background:#f2f4f3;color:#1c2b27}
-.cmp-grid a.cmp-cell:hover {box-shadow:inset 0 0 0 2px currentColor}
-.cmp-grid a.cmp-cell:focus-visible {outline:3px solid #1a6fc4;outline-offset:1px}
-.cmp-grid .extracted a.cmp-cell {background:#eef7f1;color:#173d2c}
-.cmp-grid .needs_review a.cmp-cell {background:#fff5d8;color:#573900}
-.cmp-grid .not_quoted a.cmp-cell {background:#f2f2f4;color:#3d4148}
-.cmp-grid .missing a.cmp-cell {background:#fff0f0;color:#7d2525}
+.cmp-grid .cmp-cell:hover {box-shadow:inset 0 0 0 2px currentColor}
+.cmp-grid .cmp-cell:focus-visible {outline:3px solid #1a6fc4;outline-offset:1px}
+.cmp-grid .extracted .cmp-cell {background:#eef7f1;color:#173d2c}
+.cmp-grid .needs_review .cmp-cell {background:#fff5d8;color:#573900}
+.cmp-grid .not_quoted .cmp-cell {background:#f2f2f4;color:#3d4148}
+.cmp-grid .missing .cmp-cell {background:#fff0f0;color:#7d2525}
 </style>
 """
+
+
+CELL_CARD_SCRIPT = """
+<style>
+.cmp-cell[aria-expanded="true"] {outline:3px solid #1a6fc4;outline-offset:1px}
+.cmp-card {position:fixed;z-index:999999;box-sizing:border-box;width:360px;max-width:calc(100vw - 24px);max-height: min(420px,70vh);overflow:auto;background:#fff;color:#1c2b27;border:1px solid #81988a;border-radius:8px;padding:14px;box-shadow:0 5px 20px #0004;font:14px/1.45 sans-serif}
+.cmp-card[hidden] {display:none}
+.cmp-card header {display:flex;justify-content:space-between;gap:12px;font-weight:700}
+.cmp-card button {cursor:pointer;background:#eef1ef;color:#1c2b27;border:1px solid #aab8af;border-radius:4px;padding:4px 8px}
+.cmp-card p {margin:8px 0}.cmp-card small {display:block;color:#526159;overflow-wrap:anywhere}
+.cmp-card pre {white-space:pre-wrap;overflow-wrap:anywhere;background:#f2f4f3;color:#1c2b27;padding:8px;font-size:12px}
+.cmp-card .question {background:#fff3cf;color:#573900;padding:8px;border-left:3px solid #936510}
+</style>
+<script>
+(()=>{
+ const grid=document.getElementById('bid-grid-interactive');
+ if(!grid || grid.dataset.ready) return;
+ grid.dataset.ready='true';
+ const card=grid.querySelector('.cmp-card');let active=null,pinned=false,timer;
+ function close(){clearTimeout(timer);if(active)active.setAttribute('aria-expanded','false');card.hidden=true;active=null;pinned=false;}
+ function position(){if(!active)return;const r=active.getBoundingClientRect(),g=grid.querySelector('.cmp-scroll').getBoundingClientRect();
+ if(Math.max(0,g.top)>r.bottom||r.top>Math.min(innerHeight,g.bottom)){close();return;}
+ const w=card.offsetWidth,h=card.offsetHeight;
+ let x=r.right+8;if(x+w>innerWidth-12)x=Math.max(12,r.left-w-8);
+ let y=Math.max(12,Math.min(r.top,innerHeight-h-12));card.style.left=x+'px';card.style.top=y+'px';}
+ function show(cell,pin=false){clearTimeout(timer);if(pinned && !pin)return;
+ if(active!==cell){if(active)active.setAttribute('aria-expanded','false');card.innerHTML=cell.nextElementSibling.innerHTML;}
+ active=cell;pinned=pin;cell.setAttribute('aria-expanded','true');card.hidden=false;position();}
+ function later(){if(!pinned)timer=setTimeout(close,200);}
+ grid.querySelectorAll('.cmp-cell').forEach(cell=>{
+ cell.addEventListener('pointerenter',e=>{if(e.pointerType!=='touch')show(cell);});
+ cell.addEventListener('pointerleave',later);
+ cell.addEventListener('focus',()=>show(cell));
+ cell.addEventListener('blur',later);
+ cell.addEventListener('click',()=>{if(active===cell&&pinned)close();else show(cell,true);});
+ });
+ card.addEventListener('pointerenter',()=>clearTimeout(timer));card.addEventListener('pointerleave',later);
+ card.addEventListener('focusin',()=>{clearTimeout(timer);pinned=true;});
+ card.addEventListener('click',async e=>{if(e.target.closest('[data-close]')){const cell=active;close();cell?.focus();close();}
+ if(e.target.closest('[data-copy]')){try{await navigator.clipboard.writeText(card.querySelector('.cmp-evidence').innerText);e.target.textContent='Copied';}catch{e.target.textContent='Select text to copy';}}});
+ const abort=new AbortController();
+ document.addEventListener('pointerdown',e=>{if(!grid.isConnected){abort.abort();return;}if(!card.contains(e.target)&&!e.target.closest('.cmp-cell'))close();},{signal:abort.signal});
+ document.addEventListener('keydown',e=>{if(e.key==='Escape')close();},{signal:abort.signal});
+ grid.querySelector('.cmp-scroll').addEventListener('scroll',()=>{if(pinned)position();else close();});
+ window.addEventListener('resize',position,{signal:abort.signal});
+ window.addEventListener('scroll',()=>{if(pinned)position();else close();},{capture:true,signal:abort.signal});
+})();
+</script>
+"""
+
+
+def cell_evidence_html(vendor: dict, line: dict, record: dict, value: str, label: str, tooltip: list[str]) -> str:
+    """Escaped source evidence embedded locally: hovering or pinning never contacts the server."""
+    text = lambda v: escape(str(v))
+    body = [f'<header><span>{text(vendor["name"])} · Line {line["line_no"]}</span><button data-close aria-label="Close evidence">×</button></header>',
+            '<div class="cmp-evidence">', f'<small>{text(line["sku"])}</small>',
+            f'<p><b>{text(value)}</b> · {text(label)}</p>']
+    if record.get('reason_code'):
+        body.append(f'<p>{text(record["reason_code"].replace("_", " "))}</p>')
+    if record.get('resolving_question'):
+        body.append(f'<p class="question"><b>Ask vendor:</b> {text(record["resolving_question"])}</p>')
+    if record.get('derivation'):
+        body.append(f'<details><summary>Derivation</summary><pre>{text(record["derivation"])}</pre></details>')
+    body.append(f'<small>Source: {text(record.get("file_name") or "not available")} · {text(record.get("anchor") or "anchor not available")}</small>')
+    snippet = record.get("snippet") or "No source snippet recorded."
+    body.append(f'<pre>{text(snippet[:180])}{"…" if len(snippet) > 180 else ""}</pre>')
+    body.append('<details><summary>Full source and rate details</summary>')
+    if len(snippet) > 180:
+        body.append(f'<pre>{text(snippet)}</pre>')
+    body.append(f'<small>Quoted value: {text(record.get("value") if record.get("value") is not None else "not available")} {text(record.get("currency") or "")} · {text(record.get("unit") or record.get("basis") or "")}</small>')
+    body.append(f'<small>{text(" · ".join(tooltip))}</small></details></div><button data-copy>Copy evidence</button>')
+    return ''.join(body)
 
 
 def comparison_html(lines: list[dict], vendors: list[dict], fields: list[dict], mode: str = "normalized", norm_by_pair: dict | None = None) -> str:
@@ -121,7 +193,7 @@ def comparison_html(lines: list[dict], vendors: list[dict], fields: list[dict], 
     norm_by_pair = norm_by_pair or {}
     ingested = {r["vendor_id"] for r in fields}
     caption = "Normalized ex-freight rate, ₹ per piece" if mode == "normalized" else "Quoted rates in their original currency and pricing basis"
-    parts = [COMPARE_CSS, '<div class="cmp-scroll"><table class="cmp-grid">', f'<caption>{escape(caption)}</caption>',
+    parts = [COMPARE_CSS, '<div id="bid-grid-interactive"><div class="cmp-scroll"><table class="cmp-grid">', f'<caption>{escape(caption)}</caption>',
              '<thead><tr><th scope="col">RFx line</th>']
     parts.extend(f'<th scope="col">{escape(v["name"])}</th>' for v in vendors)
     parts.append("</tr></thead><tbody>")
@@ -137,8 +209,6 @@ def comparison_html(lines: list[dict], vendors: list[dict], fields: list[dict], 
             if state not in COMPARISON_GLYPHS:
                 state = "missing"
             glyph, label = COMPARISON_GLYPHS[state]
-            href = "?" + urlencode({"bid_vendor": vendor["vendor_id"],
-                                      "bid_line": line["line_no"]}) + "#source-evidence"
             not_ingested = vendor["vendor_id"] not in ingested
             tooltip = [label]
             if record.get("reason_code"):
@@ -166,11 +236,12 @@ def comparison_html(lines: list[dict], vendors: list[dict], fields: list[dict], 
                     if unit:
                         tooltip.append(unit)
             aria = escape(f'Show source evidence for {vendor["name"]}, line {line["line_no"]}, {label}')
-            parts.append(f'<td class="{state}"><a class="cmp-cell" href="{escape(href)}" target="_self" '
-                         f'title="{escape(" · ".join(tooltip))}" aria-label="{aria}">{glyph} {escape(value)}</a></td>')
+            card = cell_evidence_html(vendor, line, record, value, label, tooltip)
+            parts.append(f'<td class="{state}"><button type="button" class="cmp-cell" aria-expanded="false" '
+                         f'aria-label="{aria}">{glyph} {escape(value)}</button><template>{card}</template></td>')
         parts.append("</tr>")
-    parts.append("</tbody></table></div>")
-    return "".join(parts)
+    parts.append('</tbody></table></div><aside class="cmp-card" aria-label="Bid source evidence" hidden></aside></div>')
+    return "".join(parts) + CELL_CARD_SCRIPT
 
 
 def unit_price_states(lines: list[dict], vendor_ids: list[str], fields: list[dict]) -> dict[int, set[str]]:
@@ -1174,8 +1245,8 @@ def main() -> None:
                     st.download_button("Download award_note.md", saved[3], file_name="award_note.md", mime="text/markdown")
 
             st.caption("✓ extracted (clean) · ⚠ needs_review (amber border) · ✗ missing (red border) · – not_quoted")
-            st.caption("Click any cell to see where the number came from and the drafted question the buyer would send if it's uncertain.")
-            st.markdown(comparison_html(lines, grid_vendors, fields, "normalized", norm_by_pair), unsafe_allow_html=True)
+            st.caption("Hover or focus a cell to preview its source and drafted question. Click to keep the card open; Escape closes it.")
+            st.html(comparison_html(lines, grid_vendors, fields, "normalized", norm_by_pair), unsafe_allow_javascript=True)
             if not lines:
                 st.info("The comparison grid is waiting for event lines.")
 

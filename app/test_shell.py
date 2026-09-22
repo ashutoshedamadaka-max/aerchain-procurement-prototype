@@ -47,13 +47,13 @@ def test_grid_states_escape_text_and_suppress_unquoted_prices():
               for v, state, value in [("a", "extracted", 0), ("b", "needs_review", 12),
                                       ("c", "not_quoted", 987), ("d", "missing", 654)]]
     html = shell.comparison_html(lines, vendors, fields, mode="quoted")
-    assert html.count('<a class="cmp-cell"') == 5
+    assert html.count('type="button" class="cmp-cell"') == 5
     for glyph, _ in shell.COMPARISON_GLYPHS.values():
         assert f">{glyph} " in html
-    assert "<script>" not in html and "&lt;script&gt;" in html
+    assert "<script>bad</script>" not in html and "&lt;script&gt;bad&lt;/script&gt;" in html
     assert "INR 0.00" in html and "INR 12.00" in html
-    assert "987" not in html and "654" not in html
-    assert html.count("not ingested") == 1
+    assert ">– Not quoted</button>" in html and ">✗ No value</button>" in html
+    assert html.count(">✗ not ingested</button>") == 1
     assert "per &lt;piece&gt;" in html                          # now in the cell's tooltip (title attribute), still escaped
 
 
@@ -65,7 +65,7 @@ def test_event_grid_retains_five_columns_and_thirty_rows():
     html = shell.comparison_html(lines, vendors, fields)
     assert html.count('<th scope="row">') == 30
     assert html.count('<td class=') == 150
-    assert html.count("not ingested") == 120
+    assert html.count(">✗ not ingested</button>") == 120
     assert len(vendors) == 5 and vendors[0]["name"] == "Loaded vendor"
 
 
@@ -76,7 +76,7 @@ def test_other_fields_do_not_masquerade_as_unit_prices():
                                 [{"vendor_id": "V1", "name": "Vendor"}], fields)
     glyph, _ = shell.COMPARISON_GLYPHS["missing"]
     assert "not ingested" not in html                           # V1 is ingested (it has a line_total field); it just has no unit_price
-    assert f"{glyph} No value" in html and "999" not in html
+    assert f"{glyph} No value" in html and "Quoted value: 999" not in html
 
 
 def test_truth_database_rejected():
@@ -84,7 +84,7 @@ def test_truth_database_rejected():
         shell.read_table(ROOT / "dataset/truth/truth.sqlite", "SELECT 1")
 
 
-def test_clicking_a_cell_opens_the_evidence_dialog_and_selects_the_vendor_below(empty_db):
+def test_legacy_deep_link_opens_evidence_and_selects_vendor(empty_db):
     with sqlite3.connect(empty_db) as conn:
         conn.execute("""INSERT INTO rfx_lines VALUES
             (1,'TEST-SKU','RSC',500,350,300,5,'BC',150,'150/120/150/120/150',
@@ -111,11 +111,11 @@ def test_clicking_a_cell_opens_the_evidence_dialog_and_selects_the_vendor_below(
     assert app.code[0].value == "qty 1,000 × 42 = 42,000; vendor states <40,000>"
     assert app.code[-1].value == "<raw quote> 42.00"
     assert any("Quotation!H10" in t.value for t in app.text)
-    assert any('class="needs_review"' in m.value for m in app.markdown)
+    assert any('class="needs_review"' in m.proto.body for m in app.get("html"))
     assert any("arith_mismatch" in m.value for m in app.markdown)
     assert [s.label for s in app.selectbox] == ["Select vendor to review"]        # no more Vendor/Line pair; one shared dropdown below
     assert app.selectbox(key="bid_vendor").value == "V1"
-    grid = next(m.value for m in app.markdown if 'class="cmp-grid"' in m.value)
+    grid = next(m.proto.body for m in app.get("html") if 'class="cmp-grid"' in m.proto.body)
     assert grid.count('<td class=') == 5
 
     # A rerun closes the one-shot dialog; the page always shows normalized rates.
@@ -149,7 +149,7 @@ def test_clicking_a_cell_opens_the_evidence_dialog_and_selects_the_vendor_below(
     app.run()
     assert app.code[0].value == "revised 43"
     assert any("p2:bbox(1,2,3,4)" in t.value for t in app.text)
-    grid = next(m.value for m in app.markdown if 'class="cmp-grid"' in m.value)
+    grid = next(m.proto.body for m in app.get("html") if 'class="cmp-grid"' in m.proto.body)
     assert "43.00" not in grid and "42.00" not in grid  # no normalized record in this fixture; raw rate stays in evidence
     assert any("No open clarifications for" in i.value for i in app.info)         # the only flagged field was superseded by the extracted revision
 
@@ -220,19 +220,23 @@ def test_invalid_cell_links_are_ignored(empty_db,vendor,line):
     assert app.sidebar.radio[0].value == "Event"
 
 
-def test_cell_links_are_local_escaped_and_keyboard_accessible():
-    from html import unescape
-    from urllib.parse import urlsplit, parse_qs
-    import re
+def test_cell_cards_are_local_escaped_and_keyboard_accessible():
     grid = shell.comparison_html([{"line_no":12,"sku":"BOX"}],
                                 [{"vendor_id":"V1","name":"<Vendor>"}], [])
-    link = re.search(r'href="([^"]+)"',grid).group(1)
-    url = urlsplit(unescape(link))
-    assert not url.netloc and not url.scheme
-    assert parse_qs(url.query) == {"bid_vendor":["V1"],"bid_line":["12"]}
-    assert url.fragment == "source-evidence"
-    assert 'target="_self"' in grid and "aria-label=" in grid
+    assert 'href=' not in grid and 'target=' not in grid
+    assert 'type="button" class="cmp-cell" aria-expanded="false"' in grid
     assert "<Vendor>" not in grid
+    assert 'aria-label="Bid source evidence"' in grid
+    assert 'pointerenter' in grid and "e.key==='Escape'" in grid
+
+
+def test_card_includes_escaped_record_evidence():
+    card = shell.cell_evidence_html({"name":"Vendor"}, {"line_no":13,"sku":"BOX"},
+        {"reason_code":"spec_incomplete", "resolving_question":"Confirm <GSM>?", "snippet":"<script>alert(1)</script>",
+         "file_name":"quote.docx", "anchor":"para15", "derivation":"a < b", "value":12.3}, "INR 12.30", "Needs review", [])
+    for text in ['Line 13', 'Confirm &lt;GSM&gt;?', 'quote.docx', 'para15', 'a &lt; b', '&lt;script&gt;']:
+        assert text in card
+    assert '<script>' not in card
 
 
 def test_exact_status_glyphs():
