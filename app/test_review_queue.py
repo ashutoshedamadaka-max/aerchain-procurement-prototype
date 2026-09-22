@@ -2,6 +2,8 @@
 from pathlib import Path
 import sqlite3
 import pytest
+from src.analyst import Store
+from src.normalize import DDL
 from streamlit.testing.v1 import AppTest
 from app.test_shell import shell, empty_db, ROOT
 
@@ -57,6 +59,9 @@ def review_db(empty_db):
                 (field_id,submission_id,rfx_line_no,field_name,value,state,reason_code,currency,resolving_question)
                 VALUES (?,?,?,?,?,?,?,'INR','Please confirm <rate> & basis.')""",
                 (fid,v,line,field,value,state,reason))
+        c.executescript(DDL)                                     # one normalized price, so the exposure total is a real number
+        c.execute("""INSERT INTO norm_prices(submission_id,rfx_line_no,field_id,extraction_state,inr_per_piece,landed_inr_per_piece,comparability,landed_comparability,freight_status,comparability_reasons,landed_reasons)
+                     VALUES ('V1',1,1,'needs_review',10,10,'comparable','comparable','included','[]','[]')""")
     return empty_db
 
 
@@ -87,8 +92,10 @@ def test_event_queue_metrics_and_sort_navigation(review_db):
     app=AppTest.from_file(str(ROOT/"app/main.py"),default_timeout=15).run()
     assert not app.exception and not app.error
     metrics={m.label:m.value for m in app.metric}
-    assert metrics["Total items"]=="5"
-    assert metrics["Total ₹ at risk (known)"]=="₹ 70,000"
+    assert metrics["Fields flagged"]=="5"
+    assert "Total ₹ at risk (known)" not in metrics
+    expected=Store(review_db).review_exposure()["known_exposure_inr"]
+    assert expected and metrics[shell.EXPOSURE_LABEL]==f"₹ {shell.fmt.indian(expected,0)}"      # not the old raw field sum (₹ 70,000)
     assert any(c.value=="sorted by potential impact, not by document order." for c in app.caption)
     app.query_params["review_sort"]="risk"
     app.query_params["review_dir"]="asc"
@@ -99,3 +106,13 @@ def test_event_queue_metrics_and_sort_navigation(review_db):
     app.sidebar.radio[0].set_value("Comparison").run()
     assert app.sidebar.radio[0].value=="Comparison"
     assert review_db.read_bytes()==before
+
+
+@pytest.mark.skipif(not (ROOT/"procurement.db").exists(),reason="procurement.db is not part of the public repository")
+def test_event_total_matches_review_exposure_for_the_current_database():
+    """Regression: the Event page's total is review_exposure()'s known_exposure_inr (the value the analyst reports), formatted, for the current DB."""
+    app=AppTest.from_file(str(ROOT/"app/main.py"),default_timeout=30).run()
+    assert not app.exception
+    shown={m.label:m.value for m in app.metric}[shell.EXPOSURE_LABEL]
+    total=Store(ROOT/"procurement.db").review_exposure()["known_exposure_inr"]
+    assert total is not None and shown==f"₹ {shell.fmt.indian(total,0)}"

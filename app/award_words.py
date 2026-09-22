@@ -107,9 +107,9 @@ def build(con, scenario, basis):
     blocks = [named(w["text"], names) for w in r.get("warnings", []) if w["severity"] == "block"]
     basis_line = BASIS_LINE.get(basis, "")
     if r["status"] == "refused":
-        return dict(header="System recommendation: none — the engine refused this scenario", tone="error", sections=[("warnings", blocks or [named(w["text"], names) for w in r["warnings"]])], names=names)
+        return dict(header="**Recommendation:** none — the engine refused this scenario", tone="error", sections=[("warnings", blocks or [named(w["text"], names) for w in r["warnings"]])], names=names)
     if r["status"] != "ok" or not used:
-        return dict(header="System recommendation: none — this cannot be awarded on this cost basis", tone="error", sections=[("warnings", blocks)], names=names)
+        return dict(header="**Recommendation:** none — this cannot be awarded on this cost basis", tone="error", sections=[("warnings", blocks)], names=names)
     saving = r.get("saving")
     if len(used) == 1:
         return _single(award, ctx, con, r, scenario, gates, names, name, full, basis, basis_line, used[0])
@@ -132,9 +132,9 @@ def _single(award, ctx, con, r, scenario, gates, names, name, full, basis, basis
     table_rows = [[full(v), crore(t), "—" if t == cheapest else f"+{(t / cheapest - 1) * 100:.1f}%"] for t, v in priced]
     table_rows += [[full(v), "excluded", "gates" if v not in (gates or []) else "coverage"] for v, t in rows if not t]
     sections = [("lines", lines), ("table", "Cheapest single-source option", ["Vendor", "Total", "Gap vs cheapest"], table_rows),
-                ("text", ["System recommends the cheapest qualified single source above."] +
-                 ([f"No split of the order across two or more vendors beats awarding everything to {name(vendor)}."] if scenario != "single_vendor" else []) + [basis_line])]
-    return dict(header=f"Award to {name(vendor)} — single source", tone="info", sections=sections, names=names)
+                ("text", ["The cheapest qualified single source is shown above."] +
+                 ([f"No split of the order across two or more vendors beats awarding everything to {name(vendor)}."] if scenario != "single_vendor" else []) )]
+    return dict(header=f"**Recommendation:** Award to {name(vendor)} — single source", tone="info", sections=sections, names=names)
 
 
 def _split(r, saving, blocks, names, name, full, basis_line, used):
@@ -151,11 +151,11 @@ def _split(r, saving, blocks, names, name, full, basis_line, used):
         m = re.search(r"\((V\d+)\)", saving["vs"])
         base = name(m.group(1)) if m else "the cheapest single vendor"
         naive, real, pct = saving["naive"], saving["repriced"], saving["repriced_pct"]
-        compare = [f"On paper the split looks {lakh(abs(naive), 1)} {'cheaper' if naive >= 0 else 'more expensive'}.",
-                   ("In reality — after each vendor's volume pricing is recalculated at what they would actually ship — the split costs " + lakh(-real, 1) + " MORE."
-                    if real < 0 else "In reality — after each vendor's volume pricing is recalculated at what they would actually ship — the split still saves " + lakh(real, 1) + "."),
-                   f"That's a {abs(pct):.1f}% {'loss' if real < 0 else 'saving'} on this event."]
-        sections.append(("lines", [f"**Compared with awarding everything to {base}:**"] + compare))
+        paper = f"₹{fmt.indian(abs(naive) / 1e5, 1)} L {'cheaper' if naive >= 0 else 'more expensive'}"
+        actual = f"₹{fmt.indian(abs(real) / 1e5, 1)} L {'cheaper' if real >= 0 else 'more expensive'} ({abs(pct):.1f}%)"
+        sections.insert(0, ("saving_callout", paper, actual,
+                           "After each vendor's volume pricing is recalculated for what they'd actually ship, most of the paper saving disappears."))
+        sections.insert(0, ("text", [f"**Compared with awarding everything to {base}:**"]))
         why = _why_different(r, names, name, per)
         if why:
             sections.append(("text", ["**Why the difference**"] + why))
@@ -167,14 +167,13 @@ def _split(r, saving, blocks, names, name, full, basis_line, used):
                                        f"{n} vendor relationships instead of one." if real <= 0 else
                                        f"The saving is below {1:g}% of the {event} event. The operational cost of managing {n} vendor relationships instead of one likely exceeds any theoretical saving.")]))
         if blocks:
-            header, tone = "System recommendation: DO NOT USE THIS OPTION", "error"
+            header, tone = "**Recommendation:** DO NOT USE THIS OPTION", "error"
         elif warn:
-            header, tone = f"System recommendation: DO NOT SPLIT — single-source {base}", "error"
+            header, tone = f"**Split not recommended.** Awarding to a single vendor ({base}) saves more overall. See the trade-off below.", "warning"
         else:
-            header = f"System recommends this split — real saving of {lakh(real, 1)} ({pct:.1f}%)."
+            header = f"**Recommendation:** Use this split — real saving of {lakh(real, 1)} ({pct:.1f}%)."
     else:
-        header, tone = "System recommendation: no comparison with single-sourcing is available for this split", "warning"
-    sections.append(("text", [basis_line]))
+        header, tone = "**Recommendation:** no comparison with single-sourcing is available for this split", "warning"
     return dict(header=header, tone=tone, sections=sections, names=names)
 
 
@@ -199,9 +198,11 @@ def _why_different(r, names, name, per):
 
 def markdown(model):
     """The same model as Markdown, for the exported note."""
-    out = [f"**{model['header']}**", ""]
+    out = [model["header"], ""]
     for s in model["sections"]:
-        if s[0] == "table":
+        if s[0] == "saving_callout":
+            out += [f"**On paper:** {s[1]}", f"**In reality:** {s[2]}", s[3], ""]
+        elif s[0] == "table":
             _, title, cols, rows = s
             out += [f"**{title}**", "", "| " + " | ".join(cols) + " |", "| " + " | ".join(["---"] * len(cols)) + " |"] + ["| " + " | ".join(str(c) for c in row) + " |" for row in rows] + [""]
         elif s[0] == "warnings":
