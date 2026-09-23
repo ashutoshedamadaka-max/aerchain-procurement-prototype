@@ -992,82 +992,145 @@ SNAPSHOT = ROOT / "dataset" / "eval" / "eval_snapshot.json"
 def calibration_table(rows: dict, label: str = "Vendor") -> list[dict]:
     """A calibration 2x2 per row: flagged/not flagged against wrong/right. 'Silent' is wrong and not flagged."""
     return [{label: name, "Checked": sum(c[k] for k in ("flagged_wrong", "flagged_right", "silent_wrong", "not_flagged_right")),
-             "Flagged · wrong": c["flagged_wrong"], "Flagged · right": c["flagged_right"],
-             "Not flagged · wrong (silent)": c["silent_wrong"], "Not flagged · right": c["not_flagged_right"]} for name, c in rows.items()]
+             "Incorrect · flagged": c["flagged_wrong"], "Correct · flagged for review": c["flagged_right"],
+             "Incorrect · not flagged": c["silent_wrong"], "Correct · not flagged": c["not_flagged_right"]} for name, c in rows.items()]
 
 
 def signed_rupees(value: float | None) -> str:
     return "—" if value is None else ("−" if round(value) < 0 else "") + "₹" + fmt.indian(abs(value), 0)
 
 
+def eval_table(rows: list[dict], numeric: tuple[str, ...] = ()) -> None:
+    """Read-only, escaped report table with explicit numeric alignment."""
+    if not rows:
+        st.caption("No results recorded.")
+        return
+    cols = list(rows[0])
+    parts = ['<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:.9rem"><thead><tr>']
+    for key in cols:
+        align = "right" if key in numeric or isinstance(rows[0][key], (int, float)) else "left"
+        parts.append(f'<th style="text-align:{align};padding:8px;border-bottom:1px solid #888">{escape(key)}</th>')
+    parts.append('</tr></thead><tbody>')
+    for row in rows:
+        parts.append('<tr>')
+        for key in cols:
+            value = row[key]
+            align = "right" if key in numeric or isinstance(value, (int, float)) else "left"
+            parts.append(f'<td style="text-align:{align};padding:8px;border-bottom:1px solid #8884">{escape(str(value))}</td>')
+        parts.append('</tr>')
+    st.markdown(''.join(parts) + '</tbody></table></div>', unsafe_allow_html=True)
+
+
 def render_evals(db: Path) -> None:
-    """Read-only display of the graders' recorded output (scripts/snapshot_evals.py writes it). Nothing is evaluated here."""
+    """Present recorded benchmark results; never run graders or paid model calls."""
     st.title("Evals")
-    st.write("Every stage of this pipeline is graded against a ground-truth file the pipeline never sees. The results below are the current run's calibration, "
-             "plus deterministic tests that would break before any demo figure could move without noticing.")
+    st.write("Did we read the evidence correctly, flag uncertainty, and apply the buying rules correctly?")
     try:
         snap = json.loads(SNAPSHOT.read_text(encoding="utf-8"))
     except (OSError, ValueError):
-        st.info("No eval snapshot yet. Run `python scripts/snapshot_evals.py` to record the graders' output; this page only displays it.")
+        st.info("No eval snapshot yet. Run scripts/snapshot_evals.py to record results. This page only displays them.")
         return
-    stale = db.is_file() and db.stat().st_mtime > SNAPSHOT.stat().st_mtime
-    st.caption(f"Snapshot recorded {snap['generated_at']}" + (" · the database has changed since; re-run scripts/snapshot_evals.py to refresh." if stale else ""))
+    st.caption(f"Recorded snapshot: {snap['generated_at']} · Controlled synthetic sourcing event · Not a live evaluation")
+    ex, ph, qn, aw, tt = (snap[k] for k in ("extraction", "photo", "questionnaire", "award", "tests"))
+    seeded_ok = tt.get("sanity", {}).get("test_seeded_faults_are_all_caught") == "passed"
+    seeded = tt.get("seeded_faults")
+    with st.container(border=True):
+        st.subheader("Recorded report card")
+        columns = st.columns(4)
+        for col, title, errors, count, unit in (
+            (columns[0], "Document fields", ex["overall"]["silent_wrong"], ex["fields"], "fields"),
+            (columns[1], "Photo rows", ph["cells"]["silent_wrong"], ph["rows"], "rows"),
+            (columns[2], "Questionnaire answers", qn["overall"]["silent_wrong"], qn["answers"], "answers"),
+        ):
+            col.metric(title, f"{errors} / {count}")
+            col.caption(f"Unflagged errors / {unit} checked · {'✓ None observed' if errors == 0 else '⚠ Known errors'}")
+        columns[3].metric("Injected faults detected", f"{seeded} / {seeded}" if seeded_ok and seeded is not None else "Not confirmed")
+        columns[3].caption("Validation checks on a deliberately corrupted scratch database; not supplier gates.")
+        st.caption("Observed on this benchmark only. Each stage has a different grading rule; these are not a combined accuracy score.")
 
-    ex = snap["extraction"]
-    st.subheader("1. Extraction (documents)")
-    o = ex["overall"]
-    a, b, c, d = st.columns(4)
-    a.metric("Fields checked", fmt.indian(ex["fields"]))
-    b.metric("Flagged", o["flagged_wrong"] + o["flagged_right"])
-    c.metric("Wrong", o["flagged_wrong"] + o["silent_wrong"])
-    d.metric("Silently wrong", o["silent_wrong"])
-    st.table(calibration_table({f"{v} {r['name']}": r for v, r in ex["vendors"].items()} | {"Overall": o}))
-    st.caption("Precision proven across four document formats. " + (f"Zero silent failures on {ex['fields']} fields." if not o["silent_wrong"]
-               else f"{o['silent_wrong']} silent failure(s) on {ex['fields']} fields."))
+    with st.expander("About this recorded run"):
+        st.caption("The extraction pipeline does not read the reference truth database. Graders compare its saved output with that reference separately.")
+        if db.is_file() and db.stat().st_mtime > SNAPSHOT.stat().st_mtime:
+            st.warning("The database file is newer than this snapshot. These results may not describe its current contents.")
+        st.caption("This snapshot does not record a code revision or database fingerprint, so it cannot certify the current build. File timestamps alone do not establish a matching run.")
 
-    ph = snap["photo"]
-    st.subheader("2. Photo (rate card)")
-    st.table(calibration_table({"V4 rate card (rows)": ph["cells"]}, "Rate card"))
-    p1, p2 = ph["pass1"], ph["pass2"]
-    st.table([{"Measure": "Rows mapped to an RFx line", "Pass 1": f"{p1['mapped']} of {ph['rows']}", "Pass 2": f"{p2['mapped']} of {ph['rows']}"},
-              {"Measure": "Mapped to the right line", "Pass 1": f"{p1['mapped_correctly']} of {ph['rows']}", "Pass 2": f"{p2['mapped_correctly']} of {ph['rows']}"},
-              {"Measure": "Prices transcribed / exactly right", "Pass 1": f"{p1['prices_transcribed']} / {p1['prices_exactly_right']}", "Pass 2": f"{p2['prices_transcribed']} / {p2['prices_exactly_right']}"},
-              {"Measure": "Correctly flagged (of the rows that needed it)", "Pass 1": "", "Pass 2": f"{len(set(ph['flagged']) & set(ph['expected_uncertain']))} of {len(ph['expected_uncertain'])}"}])
-    st.caption(f"Recall lives here. {p2['mapped_correctly']}/{ph['rows']} mapped, {len(ph['flagged'])} correctly flagged including "
-               f"{len(ph['disagree'])} two-pass disagreement (line {', '.join(map(str, ph['disagree']))}). "
-               + ("Zero silent failures." if not ph["cells"]["silent_wrong"] else f"{ph['cells']['silent_wrong']} silent failure(s)."))
+    with st.container(border=True):
+        st.subheader("Known limitations")
+        failures = [d for d in qn.get("diffs", []) if d.get("silent")]
+        if failures:
+            st.warning(f"{len(failures)} questionnaire answers had grading errors that were not flagged for review in this snapshot.")
+            eval_table([{"Vendor": ex["vendors"].get(d["vendor"], {}).get("name", d["vendor"]),
+                         "Question": f"Q{d['q_no']}", "Recorded state": d["got_state"],
+                         "Expected state": d["expected_state"], "Mismatch": ", ".join(d["fields"])} for d in failures])
+        else:
+            st.caption("No unflagged questionnaire differences listed in this snapshot.")
+        gate_rows = qn.get("gates", {})
+        if gate_rows and all(g["got"] == g["expected"] for g in gate_rows.values()):
+            st.success("Recorded mandatory gate outcomes match the reference for every vendor graded.")
+        else:
+            st.warning("Mandatory gate agreement is not confirmed. Inspect the recorded gate results below.")
+        st.caption("An extracted value matching the reference can still need review: faithfully copying a vendor's incorrect total is not the same as accepting its arithmetic.")
 
-    qn = snap["questionnaire"]
-    st.subheader("3. Questionnaire")
-    st.table(calibration_table(qn["vendors"] | {"Overall": qn["overall"]}))
-    bad = {q: d for q, d in qn["by_question"].items() if d["wrong"]}
-    st.markdown(f"**By question:** {len(qn['by_question']) - len(bad)} of {len(qn['by_question'])} questions had no error across the vendors graded.")
-    if bad:
-        st.table([{"Question": f"Q{q}", "Answers": d["answers"], "Wrong": d["wrong"], "Silent": d["silent"], "Vendors": ", ".join(d["vendors"])} for q, d in bad.items()])
-    gc = qn["gate_clearance"]
-    st.caption(f"Gate clearance from documents: {', '.join(gc['got'])} (expected {', '.join(gc['expected'])}).")
-    st.caption("Live model on real documents. Silent errors documented as known limitation; none affect a gate.")
+    st.subheader("Recorded model results")
+    st.caption("Correct means matching the reference under that stage's grading rules. ‘Correct · flagged for review’ does not automatically mean over-cautious.")
+    with st.container(border=True):
+        st.markdown("### Document extraction — did we read the quoted values correctly?")
+        o = ex["overall"]
+        st.write(f"{ex['fields']} fields checked; {o['flagged_wrong'] + o['silent_wrong']} value errors; {o['flagged_wrong'] + o['flagged_right']} fields flagged for review.")
+        st.caption("The grader compares field presence and numeric values with the reference. State, reason, anchor and question differences are additional diagnostics, not all part of this accuracy count.")
+        with st.expander("Vendor-level extraction results"):
+            eval_table(calibration_table({f"{v} {r['name']}": r for v, r in ex["vendors"].items()} | {"Overall": o}))
+    with st.container(border=True):
+        st.markdown("### Photo reading — did uncertainty reach the buyer?")
+        caught = len(set(ph["flagged"]) & set(ph["expected_uncertain"]))
+        st.write(f"{caught} / {len(ph['expected_uncertain'])} expected uncertain rows flagged; {len(ph['disagree'])} disagreements between the two recorded reading passes.")
+        st.caption("This evaluation compares two photo-reading passes with reference prices and row mappings. It is not a repeated-run reliability study; absent readings are included in the report's wrong-row set.")
+        with st.expander("Photo results and reading passes"):
+            eval_table(calibration_table({"V4 rate card": ph["cells"]}))
+            eval_table([{"Measure": label, "Pass 1": ph["pass1"][key], "Pass 2": ph["pass2"][key]} for label, key in (
+                ("Rows mapped", "mapped"), ("Rows mapped correctly", "mapped_correctly"),
+                ("Prices transcribed", "prices_transcribed"), ("Prices exactly correct", "prices_exactly_right"))])
+    with st.container(border=True):
+        st.markdown("### Questionnaire — did answers and gate decisions match?")
+        st.write(f"{qn['answers']} answers graded; {qn['overall']['flagged_wrong'] + qn['overall']['silent_wrong']} grading differences, including {qn['overall']['silent_wrong']} not flagged.")
+        st.caption("Checks answer state and gate status; questions 1–5 also check stance and certificate expiry. This is not a full semantic grade of every answer's prose.")
+        with st.expander("Questionnaire, gate and attachment results"):
+            eval_table(calibration_table(qn["vendors"] | {"Overall": qn["overall"]}))
+            eval_table([{"Vendor": v, "Gate": key, "Recorded": result,
+                         "Expected": g["expected"].get(key, "not recorded")} for v, g in gate_rows.items() for key, result in g["got"].items()])
+            attachments = qn.get("attachments", {})
+            if attachments:
+                eval_table([{"Attachment check": k.replace("_", " ").capitalize(), "Count": v} for k, v in attachments.items()])
 
-    aw = snap["award"]
-    st.subheader("4. Award engine")
-    st.table([{"Scenario": s["label"], "Vendors used": ", ".join(s["vendors"]), "Naive saving": signed_rupees(s["naive"]), "True saving (re-priced)": signed_rupees(s["repriced"]),
-               "True saving %": "—" if s["pct"] is None else fmt.pct(s["pct"]),
-               "Status": "recommendable" if s["recommendable"] else "blocked: " + ", ".join(s["blockers"])} for s in aw["scenarios"]])
-    st.caption(f"Ex-freight, against {aw['baseline']}. Gates applied to {', '.join(aw['gates'])}.")
-    gate_tests = snap["tests"]["gates"]
-    ok = lambda name: all(v == "passed" for k, v in gate_tests.items() if name in k)
-    st.markdown("**Gate-sourcing regression.** With no questionnaire the gated scenario refuses; with gates supplied by the buyer and with gates evaluated from the documents it "
-                "produces the identical allocation. " + ("Both checks pass." if ok("test_before") and ok("test_after") else "A gate-sourcing test is failing: see the test suite."))
-    st.caption("Award engine tests hold scenarios against known outcomes. When tests break, story figures move — I'd know before the demo.")
+    st.subheader("Business-rule and software checks")
+    with st.container(border=True):
+        st.markdown("### Award engine — do the buying rules hold?")
+        st.caption(f"Recorded scenario outputs, ex-freight. Savings baseline: {aw['baseline']}. Qualified vendors: {', '.join(aw['gates'])}.")
+        with st.expander("Scenario results and gate regression checks"):
+            eval_table([{"Scenario": r["label"], "Vendors": ", ".join(r["vendors"]), "Before repricing": signed_rupees(r["naive"]),
+                         "After repricing": signed_rupees(r["repriced"]), "Saving %": "—" if r["pct"] is None else fmt.pct(r["pct"]),
+                         "Status": "Recommendable" if r["recommendable"] else "Not recommendable" + (": " + ", ".join(r["blockers"]) if r["blockers"] else "")} for r in aw["scenarios"]],
+                       ("Before repricing", "After repricing", "Saving %"))
+            eval_table([{"Recorded regression test": name, "Result": status} for name, status in tt.get("gates", {}).items()])
+        st.caption("These outputs and regression tests check allocation rules; they do not prove that every real-world sourcing decision is safe.")
+    with st.container(border=True):
+        st.markdown("### Validation and regression suite")
+        a, b, c = st.columns(3)
+        a.metric("Recorded tests passed", tt["passed"])
+        b.metric("Recorded tests failed", tt["failed"])
+        c.metric("Recorded tests skipped", tt["skipped"])
+        st.caption("Software test counts are not counts of correctly answered AI questions. Live-model refusal tests are opt-in; this snapshot does not include the identities or reasons of skipped tests.")
+        sanity = snap["sanity"]
+        st.write(f"Sanity report: {sanity['flagged'] if sanity['flagged'] is not None else 'unknown'} issues flagged · recorded {sanity.get('generated') or 'date unavailable'}.")
+        st.caption("The fault-injection test deliberately corrupts a scratch database and checks that expected validation rules detect the faults. It does not rerun extraction on adversarial documents.")
 
-    sn, tt = snap["sanity"], snap["tests"]
-    st.subheader("5. Sanity report")
-    a, b, c = st.columns(3)
-    a.metric("Things flagged in SANITY.md", "unknown" if sn["flagged"] is None else sn["flagged"])
-    seeded_ok = tt["sanity"].get("test_seeded_faults_are_all_caught") == "passed"
-    b.metric("Seeded faults caught", f"{tt['seeded_faults']}/{tt['seeded_faults']}" if seeded_ok else "not all")
-    c.metric("Test suite", f"{tt['passed']} passed, {tt['skipped']} skipped" + (f", {tt['failed']} failed" if tt["failed"] else ""))
-    st.caption("Automated sanity pass on every run. Runs against a scratch copy with 30 known faults injected.")
+    with st.container(border=True):
+        st.subheader("Not yet measured in this report")
+        st.markdown("- **Normalization:** a separate grader exists, but its results are not included in this snapshot.\n"
+                    "- **Analyst answer quality:** fixed questions and refusal tests exist; this report has no systematic score for answer facts, citations or completion.\n"
+                    "- **Robustness:** no repeated-run variance or unseen-document benchmark is recorded here.\n"
+                    "- **Operations:** no latency/cost budget results or history across versions are recorded here.")
+        st.caption("Next evaluation priorities: grade the fixed Ask questions, measure whether review flags were justified, then test unseen document variations and repeated runs within an explicit budget.")
 
 
 ASK_CHIPS = ["Which vendors cleared the quality gates?", "Show me the arithmetic mismatch on Kaveri line 20",
