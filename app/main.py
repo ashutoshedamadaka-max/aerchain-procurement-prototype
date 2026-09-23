@@ -15,6 +15,8 @@ import re
 from pathlib import Path
 import sqlite3
 import sys
+import time
+import uuid
 from typing import Any
 from urllib.parse import urlencode
 
@@ -584,7 +586,7 @@ def processing_summary(db: Path) -> list[tuple[str, float, float]] | None:
     with closing(sqlite3.connect(db.as_uri() + "?mode=ro", uri=True)) as conn:
         try:
             rows = conn.execute("SELECT call_id,stage,model,input_tokens,output_tokens,cached_input_tokens,elapsed_s FROM model_calls "
-                                "WHERE stage<>'analyst:streamlit' ORDER BY call_id").fetchall()
+                                "WHERE stage NOT LIKE 'analyst:streamlit%' ORDER BY call_id").fetchall()
         except sqlite3.OperationalError:
             return None
     analyst = [r for r in rows if r[1].startswith("analyst")]
@@ -1021,10 +1023,48 @@ def eval_table(rows: list[dict], numeric: tuple[str, ...] = ()) -> None:
     st.markdown(''.join(parts) + '</tbody></table></div>', unsafe_allow_html=True)
 
 
+def render_live_activity(db: Path) -> None:
+    """Operational observations from real Ask usage, never model-graded accuracy."""
+    from app import live_activity
+    with st.container(border=True):
+        st.subheader("Live analyst activity")
+        st.caption("Normal Ask interactions only · No extra evaluation model calls · Correctness not assessed")
+        try:
+            rows = live_activity.read(db)
+        except sqlite3.Error:
+            st.warning("Live activity could not be read. Recorded benchmark results remain available below.")
+            return
+        if not rows:
+            st.info("No Ask interactions recorded since activity tracking was enabled. Use Ask normally, then open Evals or select Refresh.")
+            return
+        cols = st.columns(4)
+        cols[0].metric("Recorded interactions", len(rows))
+        cols[1].metric("Answered", sum(r["status"] == "answered" for r in rows))
+        cols[2].metric("Refused", sum(r["status"] == "refused" for r in rows))
+        cols[3].metric("Partial / failed", sum(r["status"] in ("partial", "failed") for r in rows))
+        st.caption("Answered means the request completed, not that its facts were verified. Refusal can be appropriate. Counts cover all visitors on this running instance; question and answer text are not displayed or stored by activity tracking.")
+        latest = rows[0]
+        st.write(f"Latest interaction: **{latest['status'].capitalize()}** · {latest['finished_at']} (UTC) · {latest['elapsed_s']:.1f}s")
+        def shown(value):
+            return "not available" if value is None else str(value)
+        st.caption(f"Tool calls: {shown(latest['tool_calls'])} · Model requests: {shown(latest['model_requests'])} · Source anchors retrieved: " +
+                   ("not assessed" if latest['anchors_retrieved'] is None else "yes" if latest['anchors_retrieved'] else "none detected"))
+        st.caption("Anchor presence is a structural check on retrieved tool evidence. It does not verify citations in the written answer.")
+        with st.expander("Usage and timing"):
+            st.write(f"Mean end-to-end response time: {sum(r['elapsed_s'] for r in rows) / len(rows):.1f}s")
+            known = [r for r in rows if r['cost_usd'] is not None]
+            st.write(f"Estimated cost of recorded usage: ${sum(r['cost_usd'] for r in known):.4f}" if known else "Estimated cost: not available")
+            st.caption(f"Cost available for {len(known)} / {len(rows)} interactions. Based on the repository's price snapshot (2026-09-20), not live billing. Failed or unmetered provider calls may be absent.")
+            st.write(f"Latest recorded input / output tokens: {shown(latest['input_tokens'])} / {shown(latest['output_tokens'])}")
+            st.caption(f"Latest metered model calls: {latest['metered_calls']} / {shown(latest['model_requests'])} requested. Missing usage is not treated as zero.")
+        st.caption("Updates when Evals is opened or Refresh is selected. Runtime SQLite history may reset after a cloud reboot or redeployment; it is not a durable audit log.")
+
+
 def render_evals(db: Path) -> None:
     """Present recorded benchmark results; never run graders or paid model calls."""
     st.title("Evals")
     st.write("Did we read the evidence correctly, flag uncertainty, and apply the buying rules correctly?")
+    render_live_activity(db)
     try:
         snap = json.loads(SNAPSHOT.read_text(encoding="utf-8"))
     except (OSError, ValueError):
@@ -1148,6 +1188,7 @@ def render_ask(db: Path) -> None:
         question = st.text_area("Your question", key="analyst_q", placeholder="Which vendors cleared the mandatory gates?")
         submitted = st.form_submit_button("Ask")
     st.caption("The system answers from the normalized store. If it can't answer, it says what's missing and drafts a question to the source.")
+    st.caption("Status, timing and usage are recorded for aggregate Evals reporting. Activity tracking does not store your question or answer text.")
     if submitted:
         st.session_state.pop("analyst_answer", None)
         if not question.strip():
@@ -1157,20 +1198,28 @@ def render_ask(db: Path) -> None:
         elif (ROOT / "dataset/truth").resolve() in db.resolve().parents:
             st.error("Choose the pipeline database, not frozen truth.")
         else:
+            request_id, started, activity_answer = uuid.uuid4().hex, time.perf_counter(), None
             try:
                 from src.analyst import Analyst, Store
                 from src import metering
                 with st.status("Checking the bids and supporting evidence…", expanded=False) as progress:
                     analyst = Analyst(Store(db.resolve()))
                     metering.configure(db.resolve())
-                    with metering.stage("analyst:streamlit"):
+                    with metering.stage("analyst:streamlit:" + request_id):
                         answer = analyst.ask(question.strip(), progress=lambda label: progress.update(label=label))
+                    activity_answer = answer
                     progress.update(label="Evidence check finished", state="complete")
                 st.session_state["analyst_answer"] = (str(db.resolve()), question.strip(), answer)
             except (ImportError, RuntimeError) as exc:
                 st.error(f"Analyst setup failed: {exc}")
             except Exception as exc:
                 st.error(f"The analyst request failed ({type(exc).__name__}). Check provider access and connectivity, then retry.")
+            finally:
+                try:
+                    from app import live_activity
+                    live_activity.record(db, request_id, activity_answer, time.perf_counter() - started)
+                except Exception:
+                    st.warning("This interaction could not be added to live activity. Your answer is unaffected.")
     saved = st.session_state.get("analyst_answer")
     if saved and saved[0] == str(db.resolve()):
         _, prompt, answer = saved
