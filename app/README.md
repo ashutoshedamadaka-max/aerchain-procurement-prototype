@@ -1,44 +1,50 @@
-# Procurement UI
+# VQI interface
 
 Run from the repository root:
 
-    pip install streamlit
-    streamlit run app/main.py
+```powershell
+.venv/Scripts/python.exe -m streamlit run app/main.py
+```
 
-The default source is procurement.db at the repository root. Set PROCUREMENT_DB
-to select another pipeline database. The app opens SQLite read-only, supports empty
-tables created from scripts/schema.sql, and never initializes or populates data.
-Do not point it at the frozen truth database.
+The entry experience is a portfolio case study, with a shared ivory, charcoal,
+forest-green and terracotta design system. All visuals and fonts are local; no
+external asset request is required.
 
-The four pages are Event, Comparison, Ask and RFx. Comparison displays raw rates
-with their original basis/currency, all four recorded states, and vendor/line
-dropdowns for verbatim source evidence. The latest submission per vendor is shown consistently in the grid and evidence panel.
-Ask is a disabled integration placeholder; no analysis or extraction is implemented.
+## Portfolio
 
-Generator dependencies: openpyxl reportlab python-docx.
-Conversion and shell test dependencies: pytest streamlit.
-Run: python -m pytest tests/test_conversions.py app/test_shell.py
+- **The case study:** product thesis, working-demo entry points and recorded evaluation evidence.
+- **Product strategy:** user job, prioritization, trade-offs, proposed pilot measures and next experiments.
+- **Agent architecture:** pipeline responsibilities, uncertainty states and an interactive read-only tool explorer.
 
-## Integration notes
+## Working prototype
 
-Generate the four responses with: python scripts/generate_vendor_docs.py
+The six-step flow covers the sourcing brief, supplier evidence, review queue,
+clarifications, bid comparison and award decision. Ask the AI analyst exposes its
+tool calls; Evaluation lab distinguishes saved benchmarks from current usage.
 
-The renderer reads dataset/truth/truth.sqlite read-only and checks outcomes.json.
-It writes exactly V1_response.xlsx, V2_response.pdf, V3_response.docx and
-V5_response.txt under dataset/artifacts. These requested filenames differ from the
-planned filenames in submissions. V4 is untouched.
+The tool explorer on Agent architecture executes fixed examples through the real
+`src.analyst.Store` methods. It does not instantiate an AI provider. Ask remains a
+live provider-backed feature and requires a configured API key.
 
-V1 keeps Quotation!H10:H39 and K10:K39; V2 keeps quote rows on the planned
-three pages, with the questionnaire and 7pt discount footnote on page 2.
-V3 preserves commercial paragraph anchors; para29 names only the first declined
-size, with the remaining two absent, as requested. Its shared truth regret snippet
-therefore intentionally differs from the rendered prose.
+## Files
 
-Truth overrides the earlier brief: V1 has four award-value slabs (base plus three
-uplifts); V2 has 30-day net payment, with no 15-day settlement requirement recorded.
-The stored incorrect line totals on V1 line 12 and V2 line 20 remain incorrect.
+- `design.py` and `theme.css`: shared presentation primitives and responsive styles.
+- `overview.py`: portfolio landing experience; metrics come from the saved snapshot.
+- `case_study.py`: product strategy, architecture and API-free tool inspection.
+- `story.py`: guided sourcing workflow.
+- `main.py`: navigation and the working procurement views.
 
-Conversion results unpack as (value, derivation). Currency conversion results
-unpack as (value, derivation, provenance), with source/date/rate in provenance.
-The functions do not round intermediate results: the reference box weighs
-0.902538 kg and costs 37.906596 per piece at 42/kg.
+## Data and validation
+
+The UI reads the pipeline `procurement.db` by default. `PROCUREMENT_DB` selects
+another database. Frozen truth is never a valid UI source. Missing datasets and
+snapshots produce explicit empty states; benchmark numbers are not invented.
+
+```powershell
+.venv/Scripts/python.exe -m pytest tests app -q
+```
+
+Portfolio integration tests cover navigation, missing data, real read-only tool
+results and refusal to use the frozen reference. The existing suite covers the
+procurement and award logic. Browser QA is still needed to confirm the final
+visual layout on desktop and mobile.

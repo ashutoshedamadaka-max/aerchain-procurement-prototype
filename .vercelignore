@@ -4,6 +4,9 @@
 !.dockerignore
 !.vercelignore
 !requirements.txt
+!DECISIONS.md
+!.streamlit/
+!.streamlit/config.toml
 !app/
 !app/**
 !src/

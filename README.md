@@ -1,4 +1,4 @@
-# Aerchain procurement prototype
+# Vendor Quote Intelligence
 
 A Streamlit sourcing workspace for corrugated packaging bids. It compares inconsistent vendor documents, shows source evidence and uncertainty, evaluates questionnaire gates, and explains award scenarios.
 
@@ -24,14 +24,21 @@ Browsing the recorded bids does not require an API key. Ask and live extraction 
 
 Do not commit `.env`, API keys, or `.streamlit/secrets.toml`. They are excluded by `.gitignore`. On Streamlit Community Cloud, put credentials in the app's Secrets settings, not in GitHub. Restrict access to the Ask page or enforce a usage budget before exposing your API-backed demo publicly.
 
-## Pages
+## Portfolio and product experience
 
-- **Start here (Overview):** what the product does, a guided tour, how it was built, and headline eval results, written for first-time visitors.
-- **RFx:** sourcing scope, line specifications and supplier questionnaire evidence.
-- **Event:** recorded submissions and review queue.
-- **Comparison:** bid grid, source anchors, clarification questions and award-note export.
-- **Ask:** answers grounded in database tools and the award engine, with a visible tool trace.
-- **Evals:** saved evaluation results, not a live re-run of tests.
+The app opens with a portfolio case study designed to explain the product judgment
+and AI system behind the working prototype.
+
+- **The case study:** product thesis, guided demo and recorded evaluation evidence.
+- **Product strategy:** user job, scope trade-offs, proposed success measures and next experiments.
+- **Agent architecture:** extraction-to-award responsibilities and an API-free explorer of the actual read-only analyst tools.
+- **Sourcing brief / Supplier evidence / Review queue / Clarifications / Bid comparison / Award decision:** the complete six-step product workflow.
+- **Ask the AI analyst:** provider-backed answers with inspectable tool calls.
+- **Evaluation lab:** recorded benchmarks, known failures and current usage reporting.
+
+All case-study imagery is rendered locally with HTML/CSS. The redesign retains the
+Python pipeline and existing sourcing functionality. See `app/README.md` for the
+presentation structure and verification details.
 
 ## Project layout
 

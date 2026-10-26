@@ -28,6 +28,8 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 from app import award_words, clarify, fmt
 from app.overview import render_overview
+from app import design
+from app.case_study import render_strategy, render_architecture
 from app import story
 from app.award_note import generate_award_note
 from src import settings
@@ -116,7 +118,7 @@ COMPARE_CSS = """
 .cmp-grid .cmp-cell {display:block;border:0;text-align:left;font:inherit;cursor:pointer;width:calc(100% - 12px);margin:4px 6px;padding:6px 9px;border-radius:6px;text-decoration:none;
 white-space:nowrap;overflow:hidden;text-overflow:ellipsis;background:#f2f4f3;color:#1c2b27}
 .cmp-grid .cmp-cell:hover {box-shadow:inset 0 0 0 2px currentColor}
-.cmp-grid .cmp-cell:focus-visible {outline:3px solid #1a6fc4;outline-offset:1px}
+.cmp-grid .cmp-cell:focus-visible {outline:3px solid #b84925;outline-offset:1px}
 .cmp-grid .extracted .cmp-cell {background:#eef7f1;color:#173d2c}
 .cmp-grid .needs_review .cmp-cell {background:#fff5d8;color:#573900}
 .cmp-grid .not_quoted .cmp-cell {background:#f2f2f4;color:#3d4148}
@@ -127,7 +129,7 @@ white-space:nowrap;overflow:hidden;text-overflow:ellipsis;background:#f2f4f3;col
 
 CELL_CARD_SCRIPT = """
 <style>
-.cmp-cell[aria-expanded="true"] {outline:3px solid #1a6fc4;outline-offset:1px}
+.cmp-cell[aria-expanded="true"] {outline:3px solid #b84925;outline-offset:1px}
 .cmp-card {position:fixed;z-index:999999;box-sizing:border-box;width:360px;max-width:calc(100vw - 24px);max-height: min(420px,70vh);overflow:auto;background:#fff;color:#1c2b27;border:1px solid #81988a;border-radius:8px;padding:14px;box-shadow:0 5px 20px #0004;font:14px/1.45 sans-serif}
 .cmp-card[hidden] {display:none}
 .cmp-card header {display:flex;justify-content:space-between;gap:12px;font-weight:700}
@@ -1096,9 +1098,7 @@ def render_live_activity(db: Path) -> None:
 
 def render_evals(db: Path) -> None:
     """Present recorded benchmark results; never run graders or paid model calls."""
-    st.title("Evals")
-    page_intro("Evals")
-    st.write("Did we read the evidence correctly, flag uncertainty, and apply the buying rules correctly?")
+    design.page_header("Evaluation lab / Recorded evidence", "Trust is something you test.", "Inspect extraction quality, uncertainty and award logic against a separate synthetic reference. Known failures are part of the report.")
     try:
         snap = json.loads(SNAPSHOT.read_text(encoding="utf-8"))
     except (OSError, ValueError):
@@ -1217,9 +1217,9 @@ ASK_CHIPS = ["Which vendors cleared the quality gates?", "Show me the arithmetic
 
 def render_ask(db: Path) -> None:
     """Use the CLI analyst entry point; initialize its client only on submission."""
-    st.title("Ask")
-    page_intro("Ask")
-    st.caption("Try one:")
+    design.page_header("AI analyst / Grounded in the sourcing event", "Ask a question. Inspect the reasoning.", "Explore supplier eligibility, price discrepancies and award scenarios through an analyst that calls the data tools and shows its work.")
+    st.caption("Live answers use your configured AI provider and may incur API charges. For an API-free inspection, try the tool explorer on Agent architecture.")
+    st.caption("Start with a question:")
     for col, chip in zip(st.columns(len(ASK_CHIPS)), ASK_CHIPS):
         col.button(chip, key="chip_" + chip[:12], use_container_width=True, on_click=st.session_state.__setitem__, args=("analyst_q", chip))
     with st.form("analyst_question"):
@@ -1293,11 +1293,11 @@ def render_ask(db: Path) -> None:
 
 
 def main() -> None:
-    st.set_page_config(page_title="Vendor Quote Intelligence", page_icon="▦", layout="wide")
-    st.sidebar.title("Vendor Quote Intelligence")
+    st.set_page_config(page_title="VQI - Vendor Quote Intelligence", page_icon="V", layout="wide")
+    design.apply_theme()
+    st.sidebar.markdown('<div class="brand"><div class="brand-mark">v.</div><div><div class="brand-name">Quote Intelligence</div><div class="brand-sub">A product & AI case study</div></div></div>', unsafe_allow_html=True)
     db = Path(os.environ.get("PROCUREMENT_DB", str(ROOT / "procurement.db")))
-    st.sidebar.caption("Reads supplier quotes in any format and recommends who should win, with evidence. Synthetic demo data.")
-    st.sidebar.button("Refresh")
+    st.sidebar.caption("From unstructured quotes to an evidence-backed sourcing decision.")
     try:
         lines = read_table(db, """
             SELECT line_no,sku,style,length_mm,width_mm,height_mm,ply,flute,
@@ -1311,13 +1311,18 @@ def main() -> None:
         apply_cell_link(comparison_vendors(vendors), lines)
         review_column, review_direction = review_sort_selection()
         apply_questionnaire_link()
-        labels = {"Overview": "★ Start here", **{key: f"{i}. {label}" for i, (key, label, *_) in enumerate(story.STEPS, 1)},
-                  "Ask": "💬 Ask the data", "Evals": "🧪 How well it works"}
-        page = st.sidebar.radio("The story", list(labels), key="page", index=0, format_func=labels.get)
-        if not db.is_file():
-            st.info("Waiting for procurement.db. The workspace will display data when the pipeline database is available.")
+        labels = {"Overview": "The case study", "Strategy": "Product strategy", "Architecture": "Agent architecture",
+                  "RFx": "01   Sourcing brief", "Replies": "02   Supplier evidence", "Event": "03   Review queue",
+                  "Clarify": "04   Clarifications", "Comparison": "05   Bid comparison", "Award": "06   Award decision",
+                  "Ask": "Ask the AI analyst", "Evals": "Evaluation lab"}
+        page = st.sidebar.radio("EXPLORE THE PROJECT", list(labels), key="page", index=0, format_func=labels.get)
+        st.sidebar.markdown('<div class="sidebar-note"><b>Built by Ashu</b>Product thinking &amp; Applied AI<br>One synthetic event. A complete decision workflow.</div>', unsafe_allow_html=True)
+        st.sidebar.button("Refresh", use_container_width=True)
+        category = "CASE STUDY" if page in ("Overview", "Strategy", "Architecture") else "WORKING PROTOTYPE"
+        design.html(f'<div class="topline"><span>VQI / {category} / {escape(labels[page])}</span><span><i class="status-dot"></i>Synthetic demo</span></div>')
+        if not db.is_file() and page not in ("Overview", "Strategy", "Architecture"):
+            st.info("The recorded sourcing data is not included in this deployment. Explore the case study and agent architecture from the navigation.")
         if page == "Event":
-            st.markdown("<style>[data-testid='stMainBlockContainer']{padding-top:1rem;padding-bottom:1rem} [data-testid='stVerticalBlock']{gap:.65rem} [data-testid='stHorizontalBlock']{flex-wrap:nowrap;gap:.8rem} [data-testid='stColumn']{min-width:0!important;flex:1 1 0!important} [data-testid='stMetricValue']{font-size:1.6rem} h1{margin:0;padding-top:0} .review-scroll{overflow:visible}</style>", unsafe_allow_html=True)
             story.header("Event")
             unknown = render_event_tiles(db, lines, submissions, len(review_queue(db)))
             st.divider()
@@ -1424,6 +1429,10 @@ def main() -> None:
             except (sqlite3.Error, ImportError):
                 processing = None
             render_overview(db, SNAPSHOT, processing)
+        elif page == "Strategy":
+            render_strategy()
+        elif page == "Architecture":
+            render_architecture(db)
         elif page == "Ask":
             render_ask(db)
         elif page == "Evals":

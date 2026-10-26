@@ -1,172 +1,91 @@
-"""Overview page: explains the product to someone who has never seen procurement software. Numbers come from the database and eval snapshot when present."""
+"""Recruiter-facing case study backed by the recorded evaluation snapshot."""
 from __future__ import annotations
-
 from html import escape
 import json
 from pathlib import Path
-
 import streamlit as st
-
-from app import fmt, story
-
-CSS = """
-<style>
-.ov {--accent:#2563eb; --muted:rgba(128,128,128,.95); --line:rgba(128,128,128,.25); --soft:rgba(37,99,235,.07)}
-.ov-kicker {font-size:.78rem;letter-spacing:.14em;text-transform:uppercase;color:var(--accent);font-weight:700;margin:0 0 .6rem}
-.ov-hero h1 {font-size:clamp(2rem,4.2vw,3.1rem);line-height:1.08;letter-spacing:-.02em;margin:0 0 1rem;padding:0}
-.ov-lede {font-size:1.15rem;line-height:1.6;max-width:46rem;margin:0}
-.ov-section {margin:2.6rem 0 .9rem}
-.ov-section h2 {font-size:1.6rem;letter-spacing:-.01em;margin:0 0 .35rem;padding:0}
-.ov-section p {color:var(--muted);margin:0;max-width:46rem;line-height:1.55}
-.ov-grid {display:grid;gap:12px;grid-template-columns:repeat(var(--cols,4),minmax(0,1fr))}
-@media (max-width:900px){.ov-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
-@media (max-width:520px){.ov-grid{grid-template-columns:1fr}}
-.ov-card {border:1px solid var(--line);border-radius:12px;padding:16px 18px;background:var(--soft)}
-.ov-card .icon {font-size:1.5rem}
-.ov-card h4 {margin:.35rem 0 .3rem;font-size:1rem;padding:0}
-.ov-card p {margin:0;font-size:.9rem;line-height:1.5;color:var(--muted)}
-.ov-card .tag {display:inline-block;font-size:.72rem;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--accent);margin-bottom:.2rem}
-.ov-flow {display:grid;gap:10px;grid-template-columns:repeat(auto-fit,minmax(min(100%,150px),1fr));counter-reset:step}
-.ov-step {border:1px solid var(--line);border-radius:12px;padding:14px 16px;position:relative}
-.ov-step b {display:block;font-size:1rem;margin-bottom:.25rem}
-.ov-step span {font-size:.88rem;line-height:1.45;color:var(--muted)}
-.ov-step::before {counter-increment:step;content:counter(step);display:inline-grid;place-items:center;width:26px;height:26px;border-radius:50%;
- background:var(--accent);color:#fff;font-weight:700;font-size:.85rem;margin-bottom:.5rem}
-.ov-stat {font-size:2rem;font-weight:700;letter-spacing:-.02em;line-height:1.1}
-.ov-compare {display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,220px),1fr));gap:12px}
-.ov-compare div {border-radius:12px;padding:14px 18px}
-.ov-compare .paper {background:rgba(22,163,74,.12)}
-.ov-compare .real {background:rgba(217,119,6,.16)}
-.ov-compare small {display:block;color:var(--muted);font-size:.78rem;text-transform:uppercase;letter-spacing:.08em}
-.ov-quote {border-left:4px solid var(--accent);padding:.4rem 0 .4rem 1rem;font-size:1.15rem;line-height:1.5;margin:1rem 0;max-width:46rem}
-.ov-note {font-size:.82rem;color:var(--muted);margin-top:.5rem}
-</style>
-"""
-
-
-def _html(body: str) -> None:
-    st.markdown(f'<div class="ov">{body}</div>', unsafe_allow_html=True)
-
-
-def _section(title: str, intro: str = "") -> None:
-    _html(f'<div class="ov-section"><h2>{title}</h2>{f"<p>{intro}</p>" if intro else ""}</div>')
-
-
-def _cards(items: list[tuple[str, str, str]], tag: str = "", cols: int = 4) -> None:
-    _html(f'<div class="ov-grid" style="--cols:{cols}">' + "".join(
-        f'<div class="ov-card">{f"<span class=tag>{escape(tag)}</span>" if tag else ""}<div class="icon">{i}</div><h4>{t}</h4><p>{d}</p></div>'
-        for i, t, d in items) + "</div>")
-
-
-def _go(page: str) -> None:
-    st.session_state["page"] = page
+from app.design import card, footer, go, html, section
 
 
 def _snapshot(path: Path) -> dict | None:
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
+        result = json.loads(path.read_text(encoding='utf-8'))
+        return result if isinstance(result, dict) else None
     except (OSError, ValueError):
         return None
 
 
-def render_overview(db: Path, snapshot_path: Path, processing: list[tuple[str, float, float]] | None) -> None:
-    st.markdown(CSS, unsafe_allow_html=True)
-    _html('<div class="ov-hero"><p class="ov-kicker">AI prototype · Procurement · Built solo in 2 days</p>'
-          '<h1>Five suppliers sent quotes in five different formats.<br>Who should win the order?</h1>'
-          '<p class="ov-lede">Priya, a buyer, needs 30 sizes of cardboard boxes for the year. She asks five suppliers for prices, and each replies differently: '
-          'a spreadsheet, a PDF, a Word letter, a phone photo, an email. This product reads them all, <b>flags what it isn\'t sure about</b>, '
-          'drafts the follow-up questions, compares the quotes fairly and recommends who should win. Follow her through it in six steps.</p></div>')
-    st.write("")
-    a, b, _ = st.columns([1, 1, 2])
-    a.button("Begin the story: step 1 →", type="primary", use_container_width=True, on_click=_go, args=("RFx",))
-    b.button("See the test results", use_container_width=True, on_click=_go, args=("Evals",))
-
-    _section("The story in six steps", "Follow one buyer from the request she sends to the supplier she picks. Each step is a page; open them in order.")
-    teasers = ("30 box sizes, five suppliers, three must-haves.", "Each original file shown next to what the product read from it.",
-               "Who passes the must-haves, and every doubtful value ranked by ₹ at stake.", "Every open point gathered into one ready-to-send email per supplier.",
-               "Every quote converted to ₹ per box and laid side by side.", "One supplier or a split, with the reasoning shown.")
-    for row in (story.STEPS[:3], story.STEPS[3:]):
-        for col, (page, label, title, *_) in zip(st.columns(3), row):
-            n = story.STORY_PAGES.index(page) + 1
-            with col.container(border=True):
-                _html(f'<p class="ov-kicker" style="margin:0 0 .2rem">Step {n} · {escape(label)}</p><h4 style="margin:0 0 .3rem;padding:0">{escape(title)}</h4>'
-                      f'<p class="ov-note" style="margin:0 0 .6rem">{escape(teasers[n - 1])}</p>')
-                st.button(f"Open step {n} →", key=f"tour_{page}", on_click=_go, args=(page,), use_container_width=True)
-
-    _section("Two things it caught that a spreadsheet would miss")
-    left, right = st.columns(2, gap="large")
-    with left:
-        _html('<div class="ov-card"><span class="tag">Finding 1 · Like-for-like</span><h4>The cheapest quote wasn\'t for the same box</h4>'
-              '<p>Om Sai looked 20% cheaper than the other suppliers. But on those boxes it had quoted thinner paper (120 GSM instead of the 150 GSM asked for). '
-              'Compared like-for-like, the real gap was 8.7%. It also failed all three mandatory requirements, so it can\'t win at all.</p></div>')
-    with right:
-        split = next((s for s in (_snapshot(snapshot_path) or {}).get("award", {}).get("scenarios", []) if s["scenario"] == "gated_split"), None)
-        naive, real, pct = (f"₹{split['naive'] / 1e5:.1f} lakh", f"₹{split['repriced'] / 1e5:.1f} lakh", f"{split['pct']:.2f}%") if split else ("₹11.9 lakh", "₹1.0 lakh", "0.26%")
-        _html('<div class="ov-card"><span class="tag">Finding 2 · Hidden conditions</span><h4>Splitting the order looked smart. It wasn\'t.</h4>'
-              f'<div class="ov-compare" style="margin:.6rem 0"><div class="paper"><small>Saving on paper</small><span class="ov-stat">{naive}</span></div>'
-              f'<div class="real"><small>Saving in reality</small><span class="ov-stat">{real}</span></div></div>'
-              f'<p>Each supplier\'s price depended on how much it was awarded. Once those conditions are applied, the split saves {pct}, below the 1% threshold, so the system says <b>don\'t split</b>.</p></div>')
-
-    _html('<div class="ov-quote">"The system\'s job is not to always be right. It is to always be right about whether it is right."</div>')
-
-    _section("Can you trust it?", "I built a hidden answer key for every quote, then graded the system against it. "
-             "What matters most is a <b>silent error</b>: a wrong number the system presented as certain.")
+def render_overview(db: Path, snapshot_path: Path, processing: list | None) -> None:
+    html('''<div class="hero"><div>
+<p class="eyebrow">Product case study / Applied AI</p>
+<h1>Messy quotes.<br>Clear decisions.<br><em>Evidence first.</em></h1>
+<p class="hero-lede">A sourcing copilot that turns five very different supplier quotes into one defensible buying decision. Built around the hardest part of enterprise AI: knowing when to ask a human.</p>
+<div class="hero-tags"><span>PRODUCT STRATEGY</span><span>AGENT DESIGN</span><span>EVALUATION</span></div>
+</div><div class="system-preview" aria-label="Illustration of the quote intelligence workflow">
+<div class="preview-top"><span>From inbox to decision</span><span>System overview ↗</span></div>
+<div class="format-row"><div class="file-tile"><b>▦</b>XLSX</div><div class="file-tile"><b>≡</b>PDF</div><div class="file-tile"><b>¶</b>DOCX</div><div class="file-tile"><b>▧</b>PHOTO</div><div class="file-tile"><b>✉</b>EMAIL</div></div>
+<div class="flow-connector">↓</div><div class="engine"><div><b>Quote intelligence engine</b><small>Read → verify → normalize → evaluate</small></div><span class="engine-symbol">✳</span></div>
+<div class="flow-connector">↓</div><div class="decision-preview"><p class="eyebrow">A decision you can inspect</p>
+<div class="preview-line"><span>Prices on a common basis</span><span class="preview-pill">₹ / piece</span></div>
+<div class="preview-line"><span>Uncertain values surfaced</span><span class="preview-pill amber">Human review</span></div>
+<div class="preview-line"><span>Recommendation with provenance</span><span class="preview-pill">Source linked</span></div></div>
+<p class="preview-foot">Illustrative workflow · Explore the recorded sourcing event below.</p>
+</div></div>''')
+    a, b, _ = st.columns([1.15, 1.15, 1.7])
+    a.button('Explore the working demo →', type='primary', use_container_width=True, on_click=go, args=('Comparison',))
+    b.button('Read the product thinking', use_container_width=True, on_click=go, args=('Strategy',))
+    html('''<div class="meta-strip"><div><small>Ownership</small><b>Product + AI implementation</b></div><div><small>Domain</small><b>B2B procurement / Packaging</b></div><div><small>Deliverable</small><b>Working end-to-end prototype</b></div><div><small>Context</small><b>Independent case study</b></div></div>''')
+    section('01', 'The problem behind the spreadsheet.', 'A quote is easy to read. Knowing whether it is comparable is the real work.')
+    html('<div class="editorial-grid">' + ''.join([
+        card('01 / Fragmented inputs', 'Five suppliers. Five formats.', 'The buyer receives a spreadsheet, a PDF, a Word letter, a photographed rate card and an email. Each has its own structure and omissions.'),
+        card('02 / Hidden differences', 'The lowest price can mislead.', 'Per-kilogram rates, thinner paper, conditional discounts and volume surcharges make a simple price ranking unreliable.'),
+        card('03 / The trust gap', 'A confident error costs more.', 'If the buyer cannot see which values need checking, they must recheck everything. Automation only helps when its uncertainty is actionable.'),
+    ]) + '</div>')
+    html('<div class="thesis"><h3>Make the decision<br>auditable, from the start.</h3><p>My product bet: accept the supplier’s existing workflow, absorb the format complexity, and make every important number traceable. The AI interprets the evidence. Code computes the commercial outcome. The buyer stays in control.</p></div>')
     snap = _snapshot(snapshot_path)
-    if snap:
-        ex, ph, qn, tt = snap["extraction"], snap["photo"], snap["questionnaire"], snap["tests"]
-        cols = st.columns(4)
-        for col, (value, label) in zip(cols, (
-            (f"{ex['overall']['silent_wrong']} / {ex['fields']}", "silent errors in document fields"),
-            (f"{ph['cells']['silent_wrong']} / {ph['rows']}", "silent errors on the phone photo. Every misread price was flagged."),
-            (f"{qn['overall']['silent_wrong']} / {qn['answers']}", "silent errors in questionnaire answers (known, listed on Evals)"),
-            (f"{tt['passed']}", "automated tests passing when recorded"),
-        )):
+    split = next((item for item in (snap or {}).get('award', {}).get('scenarios', []) if item.get('scenario') == 'gated_split'), None)
+    if split and isinstance(split.get('naive'), (int, float)) and isinstance(split.get('repriced'), (int, float)) and split['naive'] > 0:
+        section('02', 'The saving that almost disappeared.', 'A useful AI product changes the quality of a decision, not just the speed of a task.')
+        apparent, adjusted = split['naive'], split['repriced']
+        bar = max(0, min(100, adjusted / apparent * 100))
+        html(f'''<div class="insight-panel"><div><p class="eyebrow">Inside the recorded sourcing event</p><h3>Cheapest by line.<br>More complicated by order.</h3><p>Splitting the order changes how much each supplier wins. Volume surcharges and discount conditions then change the price. The award engine recalculates before recommending.</p><p class="source-note">Synthetic scenario, ex-freight. These are modeled savings, not realized customer impact.</p></div><div class="savings-chart"><div class="savings-label"><span>Apparent split saving</span><b>&#8377;{apparent / 1e5:.1f} lakh</b></div><div class="savings-track"><div style="width:100%"></div></div><div class="savings-label"><span>After commercial conditions</span><b>&#8377;{adjusted / 1e5:.1f} lakh</b></div><div class="savings-track"><div class="adjusted" style="width:{bar:.2f}%"></div></div><p class="source-note">Recorded evaluation: {escape(str(snap.get('generated_at', ''))[:10])}. Inspect the award page for the current recommendation and its conditions.</p></div></div>''')
+        st.button('Inspect the award reasoning', on_click=go, args=('Award',))
+
+    section('03', 'Take the product for a spin.', 'Enter at the decision, or follow the buyer through the full workflow. Recorded data needs no API call.')
+    tours = [
+        ('01', 'Define the buying rules', 'Inspect the 30 line items and mandatory supplier requirements.', 'RFx'),
+        ('02', 'See what the AI read', 'View original supplier files beside their extracted prices and evidence.', 'Replies'),
+        ('03', 'Focus human attention', 'Inspect uncertainty, supplier eligibility and the review queue.', 'Event'),
+        ('04', 'Resolve the open questions', 'Turn incomplete evidence into a clarification draft for each supplier.', 'Clarify'),
+        ('05', 'Compare like for like', 'Explore normalized prices. Open any cell to see its source.', 'Comparison'),
+        ('06', 'Make the award decision', 'Compare a single supplier with a split, including commercial conditions.', 'Award'),
+    ]
+    for start in (0, 3):
+        for col, (number, title, copy, page) in zip(st.columns(3, gap='medium'), tours[start:start + 3]):
             with col.container(border=True):
-                _html(f'<div class="ov-stat">{value}</div><p class="ov-note" style="margin-top:.3rem">{label}</p>')
-        st.caption(f"Recorded {snap['generated_at'][:10]} on a synthetic event. The full breakdown, including what went wrong, is on the Evals page.")
+                html(f'<div class="tour-number">{number}</div><h3 class="tour-title">{title}</h3><p class="tour-copy">{copy}</p>')
+                st.button('Explore →', key=f'tour_{page}', on_click=go, args=(page,), use_container_width=True)
+    section('04', 'Evidence over a headline accuracy score.', 'The primary failure to watch: an incorrect value presented without a review flag.')
+    snap = _snapshot(snapshot_path)
+    if snap and all(k in snap for k in ('extraction', 'photo', 'questionnaire', 'tests')):
+        ex, ph, qn, tests = (snap[k] for k in ('extraction', 'photo', 'questionnaire', 'tests'))
+        metrics = [
+            (f"{ex['overall']['silent_wrong']} / {ex['fields']}", 'unflagged errors · document fields', ex['overall']['silent_wrong'] > 0),
+            (f"{ph['cells']['silent_wrong']} / {ph['rows']}", 'unflagged errors · photo rows', ph['cells']['silent_wrong'] > 0),
+            (f"{qn['overall']['silent_wrong']} / {qn['answers']}", 'unflagged errors · questionnaire', qn['overall']['silent_wrong'] > 0),
+            (str(tests['passed']), 'automated tests · recorded run', False),
+        ]
+        html('<div class="metric-row">' + ''.join(f'<div class="proof-metric {"warn" if warn else ""}"><strong>{value}</strong><span>{label}</span></div>' for value, label, warn in metrics) + '</div>')
+        html(f'<p class="source-note">Recorded {escape(str(snap.get("generated_at", ""))[:10])} · Controlled synthetic benchmark · Different denominators, not a combined accuracy score. These results do not certify the current build.</p>')
     else:
-        st.caption("No eval snapshot is available in this deployment.")
-
-    _section("How I built it", "Solo, in two days, as a product take-home. I made the scope cuts deliberately; each one is written up in the decision log.")
-    if processing:
-        cost, minutes = sum(c for _, _, c in processing if c == c), sum(t for _, t, _ in processing) / 60
-        run = f"~₹{fmt.indian(cost, 0)} and ~{minutes:.0f} minutes"
-    else:
-        run = "a few minutes and about ₹100"
-    _cards([
-        ("🧠", "AI reads, code computes", "Language models (OpenAI GPT-5.5 and GPT-5.4-mini) only read documents and pick tools. Python does every conversion and total."),
-        ("🔁", "Two reads of the photo", "The photographed rate card is read twice, independently. Where the reads disagree, the value is flagged instead of guessed."),
-        ("🧾", "Evidence for every number", "Each value stores its cell, page or line and the exact text it came from. That's what the hover cards on Comparison show."),
-        ("🧪", "A hidden answer key", "The five quotes were generated from box physics (dimensions, paper weight, ply), with planted traps and a separate answer key for grading."),
-        ("💸", "Cheap to run", f"Processing all five quotes plus a scripted analyst session cost {run}."),
-        ("🧰", "Simple stack", "Python, SQLite and Streamlit. Plain functions for the five award strategies, and SQL as the analyst's query plan."),
-    ], cols=3)
-    st.write("")
-    _cards([
-        ("✂️", "No supplier portal", "Forcing suppliers into a template means fewer of them bid, and fewer bids cost more than messy files do. So the system absorbs the mess."),
-        ("✂️", "No AI-drafted RFQ", "Not part of what was being evaluated, and the quotes were written against a fixed RFQ anyway."),
-        ("✂️", "No voice input", "Trade terms like ply, GSM and bursting factor transcribe badly. Typed questions exercise the same reasoning."),
-        ("⏭️", "Price history: next", "Needs many events to be useful. The data model already supports a second event without changes."),
-    ], tag="Cut or deferred, on purpose")
-
-    _html('<h3 style="margin:1.6rem 0 .3rem">What happens under the hood</h3><p class="ov-note">The AI only <b>reads</b>. Plain code does all of the maths, so a wrong total is a bug that can be found and fixed, not a guess.</p>')
-    _html('<div class="ov-flow">' + "".join(f'<div class="ov-step"><b>{t}</b><span>{d}</span></div>' for t, d in (
-        ("Read", "An AI model reads each file, including the photo, and copies out every price with the exact text it came from."),
-        ("Double-check", "Code re-checks every value: does quantity × rate match the total? Do two separate reads of the photo agree?"),
-        ("Put on one basis", "Prices per piece, per 100 and per kilogram, in rupees or dollars, all become ₹ per box."),
-        ("Apply the rules", "Suppliers missing a required certificate are excluded. Discounts and volume conditions are priced in."),
-        ("Recommend & explain", "One supplier or a split? The answer comes with the evidence, the trade-off and questions to send back."),
-    )) + "</div>")
-    _html('<p class="ov-note">Every value carries one of four labels: <b>✓ read cleanly</b>, <b>⚠ needs a human check</b>, <b>✗ missing</b> (ask the supplier) or <b>– not quoted</b> (find someone else).</p>')
-
-    with st.expander("Glossary: the procurement terms used in this app"):
-        st.markdown(
-            "- **RFx / RFQ:** a request for quotation, the document a buyer sends suppliers listing what they need.\n"
-            "- **Event:** one round of quoting: the RFQ plus every reply to it.\n"
-            "- **Ply:** layers of cardboard (3, 5 or 7). More ply means a stronger, pricier box.\n"
-            "- **GSM:** grams per square metre, how heavy (and strong) the paper is. Thinner paper is cheaper.\n"
-            "- **Gate:** a mandatory requirement, such as a packaging-safety certificate or in-house strength testing. Failing one rules a supplier out whatever its price.\n"
-            "- **Ex-freight / landed cost:** price before delivery charges, versus the total including delivery.\n"
-            "- **Normalisation:** converting every quote to the same unit (₹ per box) so they can be compared.\n"
-            "- **Split award:** giving different box sizes to different suppliers instead of one supplier getting everything.")
-    st.caption("All companies, people and quotes in this demo are synthetic. This is a prototype, not a production approval system.")
+        st.info('The evaluation snapshot is not included here. The evaluation design and product walkthrough are still available; no benchmark results are inferred.')
+    st.button('Inspect results and known failures →', on_click=go, args=('Evals',))
+    section('05', 'The thinking behind the build.', 'Explore the decisions that shaped both the product and its agent system.')
+    left, right = st.columns(2, gap='large')
+    with left:
+        html(card('Product management', 'What to build. What to leave out.', 'The user problem, prioritization, scope decisions, success measures and the next experiment. A working prototype with explicit product hypotheses.'))
+        st.button('Open product strategy →', on_click=go, args=('Strategy',), use_container_width=True)
+    with right:
+        html(card('AI engineering', 'Give the model a bounded job.', 'Document extraction, deterministic validation, a read-only analyst tool loop and evaluation against a separate reference. Inspect the architecture and try a tool.'))
+        st.button('Open agent architecture →', on_click=go, args=('Architecture',), use_container_width=True)
+    footer()

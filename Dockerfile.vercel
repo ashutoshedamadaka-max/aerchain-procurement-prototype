@@ -11,6 +11,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY app/ ./app/
 COPY src/ ./src/
 COPY scripts/schema.sql ./scripts/schema.sql
+COPY DECISIONS.md ./DECISIONS.md
+COPY .streamlit/config.toml ./.streamlit/config.toml
 
 # Vercel container functions expect an HTTP server on port 80 by default.
 EXPOSE 80
