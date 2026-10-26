@@ -18,7 +18,7 @@ import uuid
 from statistics import median
 from dataclasses import dataclass, field
 
-from . import award, metering
+from . import award, metering, present
 from .extract.llm import _load_env
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -284,7 +284,7 @@ RULES = """You are the analyst layer of a sourcing tool. A buyer asks questions 
 THE RULE, before anything else. If the store cannot answer the question, say exactly what is missing and offer the drafted resolving question that would fill the gap. Never estimate, forecast, infer or fill in anything that was not asked for and is not in the store. A clean refusal is a correct answer; a plausible guess is a failure.
 
 How to answer
-- Numbers come only from tool results. Do not do arithmetic yourself: use SQL for sums, ratios and comparisons, and run_award for scenarios. Quote figures as the tool returned them (Indian format is fine: Rs 1.0 lakh, Rs 3.9 crore).
+- Numbers come only from tool results. Do not do arithmetic yourself: use SQL for sums, ratios and comparisons, and run_award for scenarios. Quote figures as the tool returned them: money and percentages in tool results are already formatted (for example ₹1,87,12,301 and 0.26%), so do not reformat or recompute them. When quoting money values in your answer, use ₹X,XX,XXX (Indian comma grouping) with no more than 2 decimal places. Percentages: max 2 decimal places.
 - Every numeric answer states, in the prose itself: the basis (ex-freight or landed; per piece or total), the coverage (how many of the 30 lines, and which are excluded and why), the assumptions in force that materially affect this number, and any low-confidence input (needs_review or derived prices). Do not bury these.
 - Cite where figures came from: the vendor, line and the source anchor for extracted values (explain_field gives anchor, snippet and file); for scenarios, the strategy and parameters.
 - Answer the question actually asked. If something material that was not asked shows up in a tool result (an expired quote, an unresolved review line, gates not applied), say so briefly. That is reporting, not estimating.
@@ -384,8 +384,8 @@ class Analyst:
 
     def _dispatch(self, name, args):
         s = self.store
-        return {"event_summary": s.event_summary, "gate_summary": s.gate_summary, "review_exposure": s.review_exposure, "run_sql": lambda: s.run_sql(args["query"]), "run_award": lambda: s.run_award(args["scenario_name"], args.get("params"), args.get("baseline_vendor")),
-                "explain_field": lambda: s.explain_field(args["vendor_id"], args["line_no"], args["field"])}[name]()
+        return present.for_model({"event_summary": s.event_summary, "gate_summary": s.gate_summary, "review_exposure": s.review_exposure, "run_sql": lambda: s.run_sql(args["query"]), "run_award": lambda: s.run_award(args["scenario_name"], args.get("params"), args.get("baseline_vendor")),
+                "explain_field": lambda: s.explain_field(args["vendor_id"], args["line_no"], args["field"])}[name]())
 
     def _call(self, api, effort=None, **kw):
         remaining = getattr(self, "_deadline", time.monotonic() + REQUEST_SECONDS) - time.monotonic()

@@ -26,6 +26,7 @@ Do not commit `.env`, API keys, or `.streamlit/secrets.toml`. They are excluded 
 
 ## Pages
 
+- **Start here (Overview):** what the product does, a guided tour, how it was built, and headline eval results, written for first-time visitors.
 - **RFx:** sourcing scope, line specifications and supplier questionnaire evidence.
 - **Event:** recorded submissions and review queue.
 - **Comparison:** bid grid, source anchors, clarification questions and award-note export.

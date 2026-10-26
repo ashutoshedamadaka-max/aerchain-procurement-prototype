@@ -10,6 +10,7 @@ from app.award_note import generate_award_note
 def test_save_refreshes_the_cached_export(award_db):
     """The threshold widget lives only on Event now; saving there still refreshes a cached award note, wherever it was drafted."""
     app=AppTest.from_file(str(ROOT/'app/main.py'),default_timeout=30).run()
+    app.sidebar.radio[0].set_value("Event").run()
     assert app.number_input[0].value == 5
     assert app.number_input[0].proto.help.startswith('The award engine blocks a recommendation when any single line worth more than X% of event value')
     note,gaps=generate_award_note(award_db,'single_vendor','landed')                     # no export button any more: seed the cached note the save refreshes
@@ -35,6 +36,7 @@ def test_validation_error_inline_without_write(empty_db,monkeypatch):
     monkeypatch.setattr(settings,'set_value',reject)
     before=empty_db.read_bytes()
     app=AppTest.from_file(str(ROOT/'app/main.py'),default_timeout=30).run()
+    app.sidebar.radio[0].set_value("Event").run()
     next(b for b in app.button if b.label=='Save').click().run()
     assert not app.exception
     assert app.error[0].value == 'Threshold rejected by settings API'

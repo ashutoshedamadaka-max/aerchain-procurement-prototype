@@ -46,8 +46,8 @@ def test_no_live_call_needed_for_evals(empty_db):
     app = AppTest.from_file(str(ROOT / 'app/main.py'), default_timeout=30).run()
     app.sidebar.radio[0].set_value('Evals').run()
     assert not app.exception and not app.error
-    text = '\n'.join(x.value for x in [*app.markdown, *app.caption])
-    assert 'Correctness not assessed' in text and 'Latest interaction: **Partial**' in text
+    text = '\n'.join(x.value for x in [*app.markdown, *app.caption, *app.info])
+    assert 'not necessarily a correct answer' in text and 'Latest interaction: **Partial**' in text
     assert 'PRIVATE' not in text
     assert before == empty_db.read_bytes()
 

@@ -90,6 +90,7 @@ def test_sortable_html_unknown_pinned_and_escaping(review_db):
 def test_event_queue_metrics_and_sort_navigation(review_db):
     before=review_db.read_bytes()
     app=AppTest.from_file(str(ROOT/"app/main.py"),default_timeout=15).run()
+    app.sidebar.radio[0].set_value("Event").run()
     assert not app.exception and not app.error
     metrics={m.label:m.value for m in app.metric}
     assert metrics["Fields flagged"]=="5"
@@ -112,6 +113,7 @@ def test_event_queue_metrics_and_sort_navigation(review_db):
 def test_event_total_matches_review_exposure_for_the_current_database():
     """Regression: the Event page's total is review_exposure()'s known_exposure_inr (the value the analyst reports), formatted, for the current DB."""
     app=AppTest.from_file(str(ROOT/"app/main.py"),default_timeout=30).run()
+    app.sidebar.radio[0].set_value("Event").run()
     assert not app.exception
     shown={m.label:m.value for m in app.metric}[shell.EXPOSURE_LABEL]
     total=Store(ROOT/"procurement.db").review_exposure()["known_exposure_inr"]

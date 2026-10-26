@@ -24,7 +24,7 @@ def empty_db(tmp_path, monkeypatch):
 def test_all_pages_with_empty_schema(empty_db):
     before = empty_db.read_bytes()
     app = AppTest.from_file(str(ROOT / "app/main.py"), default_timeout=15).run()
-    for page in ("Event", "Comparison", "Ask", "RFx"):
+    for page in ("Overview", "Event", "Comparison", "Ask", "RFx", "Evals"):
         app.sidebar.radio[0].set_value(page).run()
         assert not app.exception
         assert not app.error
@@ -84,80 +84,40 @@ def test_truth_database_rejected():
         shell.read_table(ROOT / "dataset/truth/truth.sqlite", "SELECT 1")
 
 
-def test_legacy_deep_link_opens_evidence_and_selects_vendor(empty_db):
+def test_every_cell_ships_its_popover_payload_inline_and_the_handler_is_injected():
+    """No st.dialog, no rerun on click: every cell's evidence is already in the HTML, in a <template> the page's own script reveals on click/hover/focus."""
+    lines = [{"line_no": n, "sku": f"BOX-{n}"} for n in range(1, 31)]
+    vendors = shell.comparison_vendors([{"vendor_id": "V1", "name": "Sahyadri Packaging Industries Ltd"}])
+    fields = [{"rfx_line_no": 1, "vendor_id": "V1", "field_name": "unit_price", "value": 42, "currency": "INR",
+               "state": "needs_review", "reason_code": "arith_mismatch", "resolving_question": "Confirm rate?",
+               "derivation": "qty 1,000 x 42 = 42,000; vendor states 40,000", "file_name": "sample.xlsx", "anchor": "Quotation!H10", "snippet": "<raw> 42.00"}]
+    grid = shell.comparison_html(lines, vendors, fields)
+    assert grid.count('class="cmp-cell"') == 150 and grid.count('<template>') == 150   # one payload per cell, no server round trip needed to read it
+    assert grid.count('<script>') == 1                                                # the handler is injected once, not duplicated per cell
+    assert 'href=' not in grid and 'st.dialog' not in grid
+    for marker in ("pointerenter", "pointerleave", "'click'", "e.key==='Escape'", "clipboard.writeText", "pointerdown"):
+        assert marker in grid
+    assert "arith_mismatch".replace("_", " ") in grid and "Confirm rate?" in grid and "Quotation!H10" in grid and "42.00" in grid
+
+
+def test_deep_link_still_selects_the_vendor_in_clarifications_without_a_dialog(empty_db):
+    """A direct ?bid_vendor=&bid_line= link (e.g. a bookmark) still pre-selects that vendor below; it no longer opens any dialog."""
     with sqlite3.connect(empty_db) as conn:
         conn.execute("""INSERT INTO rfx_lines VALUES
             (1,'TEST-SKU','RSC',500,350,300,5,'BC',150,'150/120/150/120/150',
              20,'plain',1000,'piece',1.131,0.902538,0)""")
-        conn.execute("""INSERT INTO vendors VALUES
-            ('V1','Test vendor','test','xlsx','test','test',0,0,0,0)""")
+        conn.execute("INSERT INTO vendors VALUES ('V1','Test vendor','test','xlsx','test','test',0,0,0,0)")
         conn.execute("""INSERT INTO submissions VALUES
-            ('TEST-SUB','V1','sample.xlsx','xlsx','2026-03-11',NULL,NULL,0,
-             '2026-03-11',NULL,'INR',NULL,NULL,NULL)""")
-        conn.execute("""INSERT INTO bid_fields
-            (submission_id,rfx_line_no,field_name,value,unit,basis,currency,state,reason_code,anchor,snippet,resolving_question)
-            VALUES ('TEST-SUB',1,'unit_price',42,'INR/piece','per_piece','INR',
-                    'needs_review','arith_mismatch','Quotation!H10','<raw quote> 42.00','Confirm rate?')""")
-    with sqlite3.connect(empty_db) as conn:
-        conn.execute("UPDATE bid_fields SET derivation=?",
-                     ("qty 1,000 × 42 = 42,000; vendor states <40,000>",))
+            ('TEST-SUB','V1','sample.xlsx','xlsx','2026-03-11',NULL,NULL,0,'2026-03-11',NULL,'INR',NULL,NULL,NULL)""")
     app = AppTest.from_file(str(ROOT / "app/main.py"), default_timeout=15)
     app.query_params["bid_vendor"] = "V1"
     app.query_params["bid_line"] = "1"
     app.run()
     assert not app.exception and not app.error
     assert app.sidebar.radio[0].value == "Comparison"
-    assert len(app.get("dialog")) == 1                                           # a fresh click opens the evidence dialog, not a scroll
-    assert app.code[0].value == "qty 1,000 × 42 = 42,000; vendor states <40,000>"
-    assert app.code[-1].value == "<raw quote> 42.00"
-    assert any("Quotation!H10" in t.value for t in app.text)
-    assert any('class="needs_review"' in m.proto.body for m in app.get("html"))
-    assert any("arith_mismatch" in m.value for m in app.markdown)
-    assert [s.label for s in app.selectbox] == ["Select vendor to review"]        # no more Vendor/Line pair; one shared dropdown below
+    assert not app.get("dialog")                                                  # no dialog exists any more
+    assert [s.label for s in app.selectbox] == ["Select vendor to review"]
     assert app.selectbox(key="bid_vendor").value == "V1"
-    grid = next(m.proto.body for m in app.get("html") if 'class="cmp-grid"' in m.proto.body)
-    assert grid.count('<td class=') == 5
-
-    # A rerun closes the one-shot dialog; the page always shows normalized rates.
-    app.run()
-    assert not app.get("dialog")
-    assert not any(r.label == "View" for r in app.radio)
-    assert not any(n.label == "Jump to line" for n in app.number_input)
-    assert not any(b.label == "Go" for b in app.button)
-
-    # A second click, on a vendor with no data at all: the dialog reopens and says so, and the shared dropdown follows it.
-    app.query_params["bid_vendor"] = "V2"
-    app.query_params["bid_line"] = "1"
-    app.run()
-    assert not app.exception
-    assert len(app.get("dialog")) == 1
-    assert any("not ingested" in i.value for i in app.info)
-    assert app.selectbox(key="bid_vendor").value == "V2"
-    assert any("No open clarifications for" in i.value for i in app.info)
-
-    # A newer submission must drive the dialog's price and its own evidence, and clear the (now-extracted) clarification.
-    with sqlite3.connect(empty_db) as conn:
-        conn.execute("""INSERT INTO submissions
-            (submission_id,vendor_id,file_name,format,received_on,expired_at_eval,eval_date,currency)
-            VALUES ('REV','V1','revision.pdf','pdf','2026-03-12',0,'2026-03-12','INR')""")
-        conn.execute("""INSERT INTO bid_fields
-            (submission_id,rfx_line_no,field_name,value,unit,basis,currency,state,anchor,snippet)
-            VALUES ('REV',1,'unit_price',43,'INR/piece','per_piece','INR',
-                    'extracted','p2:bbox(1,2,3,4)','revised 43')""")
-    app.query_params["bid_vendor"] = "V1"
-    app.query_params["bid_line"] = "1"
-    app.run()
-    assert app.code[0].value == "revised 43"
-    assert any("p2:bbox(1,2,3,4)" in t.value for t in app.text)
-    grid = next(m.proto.body for m in app.get("html") if 'class="cmp-grid"' in m.proto.body)
-    assert "43.00" not in grid and "42.00" not in grid  # no normalized record in this fixture; raw rate stays in evidence
-    assert any("No open clarifications for" in i.value for i in app.info)         # the only flagged field was superseded by the extracted revision
-
-    # Choosing a vendor manually (not via a click) does not reopen the dialog.
-    app.selectbox(key="bid_vendor").set_value("V2").run()
-    assert not app.get("dialog")
-    app.sidebar.radio[0].set_value("Event").run()
-    assert app.sidebar.radio[0].value == "Event"
 
 
 def test_vendor_clarifications_aggregate_every_open_item_and_the_email_has_no_state_jargon(empty_db):
@@ -217,7 +177,7 @@ def test_invalid_cell_links_are_ignored(empty_db,vendor,line):
     app.query_params["bid_line"] = line
     app.run()
     assert not app.exception
-    assert app.sidebar.radio[0].value == "Event"
+    assert app.sidebar.radio[0].value == "Overview"
 
 
 def test_cell_cards_are_local_escaped_and_keyboard_accessible():
@@ -247,6 +207,7 @@ def test_exact_status_glyphs():
 def test_settings_row_lives_only_on_event(empty_db):
     """The review block threshold widget is on Event's Settings expander and nowhere else (not duplicated on Comparison)."""
     app = AppTest.from_file(str(ROOT / "app/main.py"), default_timeout=15).run()
+    app.sidebar.radio[0].set_value("Event").run()
     assert not app.exception
     assert app.number_input[0].value == 5.0 and "5%" in app.number_input[0].label
     app.sidebar.radio[0].set_value("Comparison").run()
