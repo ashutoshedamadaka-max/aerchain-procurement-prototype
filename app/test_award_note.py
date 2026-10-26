@@ -51,7 +51,7 @@ def test_missing_data_explicit(empty_db):
 
 def test_export_button(award_db):
     app=AppTest.from_file(str(ROOT/'app/main.py'),default_timeout=30).run()
-    app.sidebar.radio[0].set_value('Comparison').run()
+    app.sidebar.radio[0].set_value('Award').run()
     assert not app.exception
     assert not app.error
     assert not [b for b in app.button if b.label=='Export award note']      # the export button is gone; the live preview remains

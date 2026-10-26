@@ -28,6 +28,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 from app import award_words, clarify, fmt
 from app.overview import render_overview
+from app import story
 from app.award_note import generate_award_note
 from src import settings
 STATES = {
@@ -37,9 +38,6 @@ STATES = {
     "missing": ("∅", "Missing"),
 }
 PAGE_INTROS = {
-    "RFx": "What the buyer asked for: 30 box sizes and a supplier questionnaire. Everything else in this app is measured against this request.",
-    "Event": "Everything that came back: who replied, what processing took, and the values the system wants a person to check, most valuable first.",
-    "Comparison": "All quotes on one basis (₹ per box, before delivery). Hover any cell for the exact source text. The recommendation says who should win, and why.",
     "Ask": "Ask in plain English. Answers come from the comparison data, not from re-reading documents, and every lookup is shown. Uses a paid AI model.",
     "Evals": "How well it works, graded against a hidden answer key. A silent error, a wrong number shown as certain, is the one that matters most.",
 }
@@ -316,7 +314,7 @@ def apply_cell_link(vendors: list[dict], lines: list[dict]) -> None:
         return
     if line_no not in {r["line_no"] for r in lines}:
         return
-    st.session_state["page"] = "Comparison"
+    st.session_state["page"] = "Clarify"
     st.session_state["bid_vendor"] = vendor_id
     st.session_state["bid_line"] = line_no
     st.session_state["_clar_scroll_pending"] = True
@@ -333,7 +331,7 @@ def sync_bid_selection() -> None:
 
 REVIEW_COLUMNS = {
     "vendor": "Vendor", "line": "Line / short spec", "value": "Extracted value",
-    "reason": "Reason code", "risk": "Value at risk (₹)",
+    "reason": "Why it's flagged", "risk": "Value at risk (₹)",
     "question": "Clarifying question",
 }
 REVIEW_CSS = """
@@ -480,7 +478,7 @@ def review_table_html(items: list[dict], column: str = "risk",
                      f'<td>{glyph} {escape(state)}<br>{escape(extracted)}'
                      f'<span class="detail">{escape(row["field_name"])}'
                      f' · {escape(row.get("unit") or "")}</span></td>'
-                     f'<td>{escape(row.get("reason_code") or "—")}</td>'
+                     f'<td>{escape(story.REASONS.get(row.get("reason_code")) or row.get("reason_code") or "—")}</td>'
                      f'<td class="risk" title="{escape(row["risk_basis"])}">{risk}</td>'
                      f'<td>{question_cell((question_for(row) if question_for else None) or row.get("resolving_question") or "—")}</td></tr>')
     parts.append("</tbody></table></div>")
@@ -745,7 +743,7 @@ def review_exposure_total(db: Path) -> tuple[float | None, int]:
 
 
 def render_review_queue(db: Path, column: str, direction: str, unknown: int = 0) -> None:
-    st.header("Review queue", anchor="review-queue")
+    st.header("Doubtful values, biggest ₹ at stake first", anchor="review-queue")
     with st.expander("Settings"):
         render_settings_row(db, "Event")
         st.caption("The review block threshold decides when an uncertain line stops a recommendation: a line worth more than this share of the event's value blocks it; below it, "
@@ -903,8 +901,7 @@ def render_rfx(db: Path) -> None:
     except (OSError, ValueError) as exc:
         st.error(f"The issued RFx could not be read: {exc}")
         return
-    st.title("Request for quotation")
-    page_intro("RFx")
+    story.header("RFx")
     items = rfx.get("lines", [])
     cost = rfx.get("total_should_cost_value", rfx.get("total_should_cost_inr"))
     if cost is None and items and all(r.get("should_cost_inr_pc") is not None and r.get("annual_qty") is not None for r in items):
@@ -956,6 +953,7 @@ def render_rfx(db: Path) -> None:
     else:
         st.info("No RFx line items specified.")
     render_questionnaire(db, rfx)
+    story.footer("RFx")
 
 
 SNAPSHOT = ROOT / "dataset" / "eval" / "eval_snapshot.json"
@@ -1313,19 +1311,22 @@ def main() -> None:
         apply_cell_link(comparison_vendors(vendors), lines)
         review_column, review_direction = review_sort_selection()
         apply_questionnaire_link()
-        pages = ["Overview", "RFx", "Event", "Comparison", "Ask", "Evals"]
-        page = st.sidebar.radio("Page", pages, key="page", index=0, format_func=lambda p: "★ Start here" if p == "Overview" else f"{pages.index(p)}. {p}")
+        labels = {"Overview": "★ Start here", **{key: f"{i}. {label}" for i, (key, label, *_) in enumerate(story.STEPS, 1)},
+                  "Ask": "💬 Ask the data", "Evals": "🧪 How well it works"}
+        page = st.sidebar.radio("The story", list(labels), key="page", index=0, format_func=labels.get)
         if not db.is_file():
             st.info("Waiting for procurement.db. The workspace will display data when the pipeline database is available.")
         if page == "Event":
             st.markdown("<style>[data-testid='stMainBlockContainer']{padding-top:1rem;padding-bottom:1rem} [data-testid='stVerticalBlock']{gap:.65rem} [data-testid='stHorizontalBlock']{flex-wrap:nowrap;gap:.8rem} [data-testid='stColumn']{min-width:0!important;flex:1 1 0!important} [data-testid='stMetricValue']{font-size:1.6rem} h1{margin:0;padding-top:0} .review-scroll{overflow:visible}</style>", unsafe_allow_html=True)
-            st.title("Event")
-            page_intro("Event")
+            story.header("Event")
             unknown = render_event_tiles(db, lines, submissions, len(review_queue(db)))
             st.divider()
-            render_processing(db, len({s["vendor_id"] for s in submissions}), len(lines))
+            story.render_gates(db)
             st.divider()
-            st.subheader("Vendor responses")
+            render_review_queue(db, review_column, review_direction, unknown)
+            st.divider()
+            render_processing(db, len({s["vendor_id"] for s in submissions}), len(lines))
+            st.subheader("Files received")
             if submissions:
                 names = {v["vendor_id"]: v["name"] for v in vendors}
                 st.table([{"Vendor": names.get(s["vendor_id"], s["vendor_id"]),
@@ -1334,11 +1335,11 @@ def main() -> None:
                           for s in submissions])
             else:
                 st.info("No submissions yet.")
-            st.divider()
-            render_review_queue(db, review_column, review_direction, unknown)
-        elif page == "Comparison":
-            st.title("Comparison")
-            page_intro("Comparison")
+            story.footer("Event")
+        elif page == "Replies":
+            story.render_replies(db)
+        elif page in ("Comparison", "Clarify", "Award"):
+            story.header(page)
             grid_vendors = comparison_vendors(vendors)
             # One current submission per vendor, consistently used by the grid, the stat tiles and the Details pane.
             fields = read_table(db, """
@@ -1367,6 +1368,32 @@ def main() -> None:
                 norms = []
             norm_by_pair = {(r["vendor_id"], r["rfx_line_no"]): r for r in norms}
             vendor_names = {v["vendor_id"]: v["name"] for v in grid_vendors}
+            if page == "Clarify":
+                counts = [(v["name"], len(open_items_for_vendor(db, v["vendor_id"], v["name"], fields, lines))) for v in grid_vendors]
+                if counts:
+                    cols = st.columns(len(counts))
+                    for col, (name, n) in zip(cols, counts):
+                        with col.container(border=True):
+                            st.markdown(f"### {n}")
+                            st.caption(f"question{'s' if n != 1 else ''} for {name}")
+                    st.divider()
+                render_vendor_clarifications(fields, lines, grid_vendors, db)
+                story.footer(page)
+                return
+            if page == "Award":
+                story.render_decision_path(db)
+                scenario_label = st.radio("Award scenario", list(SCENARIO_LABELS.values()), horizontal=True)
+                scenario = next(k for k, v in SCENARIO_LABELS.items() if v == scenario_label)
+                cost_basis = "ex_freight"                          # the landed basis stays fully implemented in the engine; this page just doesn't expose it
+                st.caption(award_words.BASIS_LINE["ex_freight"])
+                render_award_preview(db, scenario, cost_basis)
+                saved = st.session_state.get("award_note_export")
+                if saved and saved[:3] == (str(db), scenario, cost_basis):
+                    for gap in saved[4]:
+                        st.warning(gap)
+                    st.download_button("Download award_note.md", saved[3], file_name="award_note.md", mime="text/markdown")
+                story.footer(page)
+                return
 
             stats = comparison_stats(lines, [v["vendor_id"] for v in grid_vendors], fields, norm_by_pair)
             tiles = st.columns(4)
@@ -1384,27 +1411,13 @@ def main() -> None:
             else:
                 tiles[3].metric("Cheapest overall", "not available")
 
-            with st.expander("Award recommendation", expanded=True):
-                st.caption(award_words.BASIS_LINE["ex_freight"])
-                scenario_label = st.radio("Award scenario", list(SCENARIO_LABELS.values()), horizontal=True)
-                scenario = next(k for k, v in SCENARIO_LABELS.items() if v == scenario_label)
-                cost_basis = "ex_freight"                          # the landed basis stays fully implemented in the engine; this page just doesn't expose it
-                render_award_preview(db, scenario, cost_basis)
-                saved = st.session_state.get("award_note_export")
-                if saved and saved[:3] == (str(db), scenario, cost_basis):
-                    for gap in saved[4]:
-                        st.warning(gap)
-                    st.download_button("Download award_note.md", saved[3], file_name="award_note.md", mime="text/markdown")
-
             st.caption("✓ extracted (clean) · ⚠ needs_review (amber border) · ✗ missing (red border) · – not_quoted")
             st.caption("Hover or focus a cell to preview its source and drafted question. Click to keep the card open; Escape closes it.")
             st.html(comparison_html(lines, grid_vendors, fields, "normalized", norm_by_pair), unsafe_allow_javascript=True)
             if not lines:
                 st.info("The comparison grid is waiting for event lines.")
 
-            st.divider()
-            with st.container(border=True):
-                render_vendor_clarifications(fields, lines, grid_vendors, db)
+            story.footer(page)
         elif page == "Overview":
             try:
                 processing = processing_summary(db.resolve()) if db.is_file() else None

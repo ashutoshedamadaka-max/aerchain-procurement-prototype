@@ -24,7 +24,7 @@ def empty_db(tmp_path, monkeypatch):
 def test_all_pages_with_empty_schema(empty_db):
     before = empty_db.read_bytes()
     app = AppTest.from_file(str(ROOT / "app/main.py"), default_timeout=15).run()
-    for page in ("Overview", "Event", "Comparison", "Ask", "RFx", "Evals"):
+    for page in ("Overview", "RFx", "Replies", "Event", "Clarify", "Comparison", "Award", "Ask", "Evals"):
         app.sidebar.radio[0].set_value(page).run()
         assert not app.exception
         assert not app.error
@@ -114,7 +114,7 @@ def test_deep_link_still_selects_the_vendor_in_clarifications_without_a_dialog(e
     app.query_params["bid_line"] = "1"
     app.run()
     assert not app.exception and not app.error
-    assert app.sidebar.radio[0].value == "Comparison"
+    assert app.sidebar.radio[0].value == "Clarify"
     assert not app.get("dialog")                                                  # no dialog exists any more
     assert [s.label for s in app.selectbox] == ["Select vendor to review"]
     assert app.selectbox(key="bid_vendor").value == "V1"
@@ -141,7 +141,7 @@ def test_vendor_clarifications_aggregate_every_open_item_and_the_email_has_no_st
             VALUES ('V1',3,'Do you hold FSC Chain-of-Custody certification?',1,'G3','','claimed_unsupported','no_attachment',
                     'V1: you state you hold FSC chain-of-custody certificate but no supporting document was attached. Please send the current certificate, showing its expiry date.')""")
     app = AppTest.from_file(str(ROOT / "app/main.py"), default_timeout=15).run()
-    app.sidebar.radio[0].set_value("Comparison").run()
+    app.sidebar.radio[0].set_value("Clarify").run()
     assert not app.exception and not app.error
     assert app.selectbox(key="bid_vendor").value == "V1"
     items = [m.value for m in app.markdown if 'class="clar-item' in m.value]

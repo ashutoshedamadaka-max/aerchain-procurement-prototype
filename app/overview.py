@@ -1,18 +1,13 @@
 """Overview page: explains the product to someone who has never seen procurement software. Numbers come from the database and eval snapshot when present."""
 from __future__ import annotations
 
-from contextlib import closing
 from html import escape
 import json
 from pathlib import Path
-import sqlite3
 
 import streamlit as st
 
-from app import fmt
-
-FORMAT_LABELS = {"xlsx": ("📊", "Excel sheet"), "pdf": ("📄", "PDF with a footnote"), "docx": ("📝", "Word document"),
-                 "jpg": ("📷", "Phone photo of a rate card"), "txt": ("✉️", "One-line email")}
+from app import fmt, story
 
 CSS = """
 <style>
@@ -67,14 +62,6 @@ def _go(page: str) -> None:
     st.session_state["page"] = page
 
 
-def _vendors(db: Path) -> list[tuple[str, str]]:
-    try:
-        with closing(sqlite3.connect(db.resolve().as_uri() + "?mode=ro", uri=True)) as con:
-            return con.execute("SELECT name,response_format FROM vendors ORDER BY vendor_id").fetchall()
-    except (sqlite3.Error, ValueError):
-        return []
-
-
 def _snapshot(path: Path) -> dict | None:
     try:
         return json.loads(path.read_text(encoding="utf-8"))
@@ -86,30 +73,25 @@ def render_overview(db: Path, snapshot_path: Path, processing: list[tuple[str, f
     st.markdown(CSS, unsafe_allow_html=True)
     _html('<div class="ov-hero"><p class="ov-kicker">AI prototype · Procurement · Built solo in 2 days</p>'
           '<h1>Five suppliers sent quotes in five different formats.<br>Who should win the order?</h1>'
-          '<p class="ov-lede">This workspace reads every quote, puts all the prices on the same basis, '
-          '<b>flags anything it isn\'t sure about</b>, and recommends who should get the order. Every number links back to the line in the supplier\'s document it came from.</p></div>')
+          '<p class="ov-lede">Priya, a buyer, needs 30 sizes of cardboard boxes for the year. She asks five suppliers for prices, and each replies differently: '
+          'a spreadsheet, a PDF, a Word letter, a phone photo, an email. This product reads them all, <b>flags what it isn\'t sure about</b>, '
+          'drafts the follow-up questions, compares the quotes fairly and recommends who should win. Follow her through it in six steps.</p></div>')
     st.write("")
     a, b, _ = st.columns([1, 1, 2])
-    a.button("Start the 2-minute tour →", type="primary", use_container_width=True, on_click=_go, args=("Comparison",))
+    a.button("Begin the story: step 1 →", type="primary", use_container_width=True, on_click=_go, args=("RFx",))
     b.button("See the test results", use_container_width=True, on_click=_go, args=("Evals",))
 
-    _section("The situation", "A buyer, Priya, needs about 20 lakh cardboard boxes a year across 30 sizes, worth roughly ₹4 crore. "
-             "She sends one request for quotation (RFQ) to five suppliers. Each replies in its own way:")
-    vendors = _vendors(db)
-    _cards([(FORMAT_LABELS.get(f, ("📎", f))[0], escape(n), FORMAT_LABELS.get(f, ("", f))[1]) for n, f in vendors] or
-           [(i, l, "") for i, l in FORMAT_LABELS.values()], cols=5)
-    _html('<p class="ov-note">Today a buyer retypes all of this into a spreadsheet by hand, guesses at units, and can easily miss a footnote that changes the price. '
-          'When finance later asks "why this supplier?", the reasoning lives only in her head.</p>')
-
-    _section("How it works", "Five steps. The AI only <b>reads</b>. Plain code does all of the maths, so a wrong total is a bug that can be found and fixed, not a guess.")
-    _html('<div class="ov-flow">' + "".join(f'<div class="ov-step"><b>{t}</b><span>{d}</span></div>' for t, d in (
-        ("Read", "An AI model reads each file, including the photo, and copies out every price with the exact text it came from."),
-        ("Double-check", "Code re-checks every value: does quantity × rate match the total? Do two separate reads of the photo agree?"),
-        ("Put on one basis", "Prices per piece, per 100 and per kilogram, in rupees or dollars, all become ₹ per box."),
-        ("Apply the rules", "Suppliers missing a required certificate are excluded. Discounts and volume conditions are priced in."),
-        ("Recommend & explain", "One supplier or a split? The answer comes with the evidence, the trade-off and questions to send back."),
-    )) + "</div>")
-    _html('<p class="ov-note">Every value carries one of four labels: <b>✓ read cleanly</b>, <b>⚠ needs a human check</b>, <b>✗ missing</b> (ask the supplier) or <b>– not quoted</b> (find someone else).</p>')
+    _section("The story in six steps", "Follow one buyer from the request she sends to the supplier she picks. Each step is a page; open them in order.")
+    teasers = ("30 box sizes, five suppliers, three must-haves.", "Each original file shown next to what the product read from it.",
+               "Who passes the must-haves, and every doubtful value ranked by ₹ at stake.", "Every open point gathered into one ready-to-send email per supplier.",
+               "Every quote converted to ₹ per box and laid side by side.", "One supplier or a split, with the reasoning shown.")
+    for row in (story.STEPS[:3], story.STEPS[3:]):
+        for col, (page, label, title, *_) in zip(st.columns(3), row):
+            n = story.STORY_PAGES.index(page) + 1
+            with col.container(border=True):
+                _html(f'<p class="ov-kicker" style="margin:0 0 .2rem">Step {n} · {escape(label)}</p><h4 style="margin:0 0 .3rem;padding:0">{escape(title)}</h4>'
+                      f'<p class="ov-note" style="margin:0 0 .6rem">{escape(teasers[n - 1])}</p>')
+                st.button(f"Open step {n} →", key=f"tour_{page}", on_click=_go, args=(page,), use_container_width=True)
 
     _section("Two things it caught that a spreadsheet would miss")
     left, right = st.columns(2, gap="large")
@@ -145,19 +127,6 @@ def render_overview(db: Path, snapshot_path: Path, processing: list[tuple[str, f
     else:
         st.caption("No eval snapshot is available in this deployment.")
 
-    _section("Take the tour", "Each page shows one stage of a buyer's day. Open them in order.")
-    tour = (("RFx", "1 · What was asked", "The 30 box sizes, quantities and the supplier questionnaire, including three mandatory requirements."),
-            ("Event", "2 · What came back", "Who replied, how long processing took, and the queue of values the system wants a human to check, ranked by ₹ at stake."),
-            ("Comparison", "3 · Who should win", "All quotes side by side. Hover any cell to see the source text. Try the 'Split across vendors' recommendation."),
-            ("Ask", "4 · Ask in plain English", "Questions like \"should we split the order?\" answered from the data, with every lookup it made shown."),
-            ("Evals", "5 · How well it works", "The graded results: what it got right, what it flagged, and what it got wrong."))
-    for row in (tour[:3], tour[3:]):
-        for col, (page, title, text) in zip(st.columns(3), row):
-            with col.container(border=True):
-                st.markdown(f"**{title}**")
-                st.caption(text)
-                st.button(f"Open {page} →", key=f"tour_{page}", on_click=_go, args=(page,), use_container_width=True)
-
     _section("How I built it", "Solo, in two days, as a product take-home. I made the scope cuts deliberately; each one is written up in the decision log.")
     if processing:
         cost, minutes = sum(c for _, _, c in processing if c == c), sum(t for _, t, _ in processing) / 60
@@ -179,6 +148,16 @@ def render_overview(db: Path, snapshot_path: Path, processing: list[tuple[str, f
         ("✂️", "No voice input", "Trade terms like ply, GSM and bursting factor transcribe badly. Typed questions exercise the same reasoning."),
         ("⏭️", "Price history: next", "Needs many events to be useful. The data model already supports a second event without changes."),
     ], tag="Cut or deferred, on purpose")
+
+    _html('<h3 style="margin:1.6rem 0 .3rem">What happens under the hood</h3><p class="ov-note">The AI only <b>reads</b>. Plain code does all of the maths, so a wrong total is a bug that can be found and fixed, not a guess.</p>')
+    _html('<div class="ov-flow">' + "".join(f'<div class="ov-step"><b>{t}</b><span>{d}</span></div>' for t, d in (
+        ("Read", "An AI model reads each file, including the photo, and copies out every price with the exact text it came from."),
+        ("Double-check", "Code re-checks every value: does quantity × rate match the total? Do two separate reads of the photo agree?"),
+        ("Put on one basis", "Prices per piece, per 100 and per kilogram, in rupees or dollars, all become ₹ per box."),
+        ("Apply the rules", "Suppliers missing a required certificate are excluded. Discounts and volume conditions are priced in."),
+        ("Recommend & explain", "One supplier or a split? The answer comes with the evidence, the trade-off and questions to send back."),
+    )) + "</div>")
+    _html('<p class="ov-note">Every value carries one of four labels: <b>✓ read cleanly</b>, <b>⚠ needs a human check</b>, <b>✗ missing</b> (ask the supplier) or <b>– not quoted</b> (find someone else).</p>')
 
     with st.expander("Glossary: the procurement terms used in this app"):
         st.markdown(

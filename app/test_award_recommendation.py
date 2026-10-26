@@ -24,7 +24,7 @@ def current_comparison(monkeypatch):
     monkeypatch.setenv("PROCUREMENT_DB", str(db))
     before = db.read_bytes()
     app = AppTest.from_file(str(ROOT / "app/main.py"), default_timeout=30).run()
-    app.sidebar.radio[0].set_value("Comparison").run()
+    app.sidebar.radio[0].set_value("Award").run()
     assert not app.exception and not app.error
     yield app
     assert db.read_bytes() == before
@@ -32,10 +32,11 @@ def current_comparison(monkeypatch):
 
 def test_cheapest_overall_current_db_flags_om_sai(current_comparison):
     app = current_comparison
+    app.sidebar.radio[0].set_value("Comparison").run()
     tile = next(m for m in app.metric if m.label == "Cheapest overall")
     assert "Om Sai" in tile.value and "V3" in tile.value
     assert any(c.value == "⚠ Not eligible — fails gate checks" for c in app.caption)
-    assert any(e.label == "Award recommendation" for e in app.expander)
+    assert not any(r.label == "Award scenario" for r in app.radio)          # the decision is its own story step now
     assert not any(r.label == "View" for r in app.radio)
     assert not any(n.label == "Jump to line" for n in app.number_input)
 
